@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import JSZip from '[esm.sh](https://esm.sh/jszip@3.10.1)';
+import JSZip from 'https://esm.sh/jszip@3.10.1';
 
 /* ================= CÓDIGO COMPARTIDO (se copia tal cual al export) ================= */
 
