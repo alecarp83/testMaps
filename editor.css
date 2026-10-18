@@ -1,0 +1,21 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; font: 13px system-ui, sans-serif; color: #e6e6e6; background: #111; }
+body { display: flex; }
+#panel { width: 270px; height: 100%; overflow-y: auto; background: #1c1f24; padding: 12px; border-right: 1px solid #2c3038; }
+#view { flex: 1; position: relative; }
+#view canvas { display: block; }
+h1 { font-size: 16px; margin: 0 0 10px; }
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #8b93a1; margin: 0 0 8px; }
+section { border-bottom: 1px solid #2c3038; padding: 10px 0; }
+label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 5px 0; }
+label.chk { justify-content: flex-start; }
+input, select { background: #262a31; color: inherit; border: 1px solid #383d47; border-radius: 4px; padding: 4px 6px; width: 120px; }
+input[type=checkbox] { width: auto; }
+input[type=color] { padding: 0; height: 26px; }
+button { background: #2b3038; color: inherit; border: 1px solid #3a404b; border-radius: 5px; padding: 6px 8px; cursor: pointer; flex: 1; }
+button:hover { background: #353b45; }
+button.on, button.primary { background: #2f6fde; border-color: #2f6fde; }
+button.danger { background: #8e2b2b; border-color: #8e2b2b; }
+.row { display: flex; gap: 6px; margin-top: 6px; }
+#palette { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.help { color: #8b93a1; line-height: 1.6; font-size: 12px; }
