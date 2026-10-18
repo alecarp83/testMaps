@@ -1,1124 +1,1048 @@
 "use strict";
 
+/*
+  ECLIPSE · CAPÍTULO 1 — Lógica del protagonista, cámara en 3ª persona,
+  enemigos infectados, linterna, colisiones, HUD y bucle principal.
+  Estética tipo Roblox (bloques low-poly) con iluminación y niebla realistas.
+*/
+
 (() => {
-  const $ = selector => document.querySelector(selector);
-  const canvas = $("#world");
-  const ctx = canvas.getContext("2d", { alpha: false });
-  const audio = window.EclipseAudio;
+  const $ = id => document.getElementById(id);
 
-  const ui = {
-    overlay: $("#overlay"),
-    title: $("#overlayTitle"),
-    text: $("#overlayText"),
-    start: $("#startButton"),
-    sector: $("#sector"),
-    objective: $("#objective"),
-    health: $("#health"),
-    healthText: $("#healthText"),
-    battery: $("#battery"),
-    batteryText: $("#batteryText"),
-    stamina: $("#stamina"),
-    stance: $("#stance"),
-    hint: $("#hint"),
-    message: $("#message"),
-    damage: $("#damage"),
-    vignette: $("#vignette")
-  };
+  // ---------------------------------------------------------------
+  // 1. Comprobaciones de motor
+  // ---------------------------------------------------------------
+  if (!window.THREE) {
+    $("overlayTitle").textContent = "No se pudo cargar el motor";
+    $("overlayText").textContent =
+      "Revisa tu conexión a Internet y recarga la página.";
+    $("resume").hidden = true;
+    return;
+  }
 
-  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-  const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-  const normalizeAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
+  const T = THREE;
 
-  let settings = { volume: .55, sensitivity: .0025 };
+  // ---------------------------------------------------------------
+  // 2. Ajustes persistentes (compartidos con index.html)
+  // ---------------------------------------------------------------
+  let settings = { volume: .45, sensitivity: 1 };
   try {
-    const stored = JSON.parse(localStorage.getItem("eclipse.settings"));
-    if (stored && typeof stored === "object") {
-      settings = { ...settings, ...stored };
-    }
+    settings = {
+      ...settings,
+      ...JSON.parse(localStorage.getItem("eclipse-settings") || "{}")
+    };
   } catch {}
 
-  settings.volume = clamp(Number(settings.volume) || 0, 0, 1);
-  settings.sensitivity = clamp(
-    Number(settings.sensitivity) || .0025, .001, .006
-  );
+  const audio = new EclipseAudio(settings.volume);
 
-  // Datos del capítulo. 0 = suelo, 1 = pared, 2 = obstáculo.
-  const chapter = {
-    width: 29,
-    height: 13,
-    sectors: ["Pasillo A", "Comedor", "Enfermería", "Bahía de escape"],
-    start: { x: 2.5, y: 6.5, angle: 0 },
-    doors: [
-      { x: 7, y: 6, open: false, locked: false },
-      { x: 14, y: 6, open: false, locked: false },
-      { x: 21, y: 6, open: false, locked: true }
-    ],
-    items: [
-      { x: 4.5, y: 4.5, type: "battery", taken: false },
-      { x: 10.5, y: 3.5, type: "log", taken: false },
-      { x: 12.5, y: 9.5, type: "battery", taken: false },
-      { x: 17.5, y: 9.5, type: "medkit", taken: false },
-      { x: 19.5, y: 3.5, type: "fuse", taken: false },
-      { x: 23.5, y: 9.5, type: "battery", taken: false },
-      { x: 26.5, y: 6.5, type: "exit", taken: false }
-    ],
-    enemySpawns: [
-      { x: 11.5, y: 8.5 },
-      { x: 18.5, y: 7.5 },
-      { x: 24.5, y: 3.5 }
-    ]
-  };
+  // ---------------------------------------------------------------
+  // 3. Escena, renderer y cámara
+  // ---------------------------------------------------------------
+  const scene = new T.Scene();
+  scene.background = new T.Color(0x05090d);
+  scene.fog = new T.FogExp2(0x080e14, .045);
 
-  const grid = Array.from({ length: chapter.height }, (_, y) =>
-    Array.from({ length: chapter.width }, (_, x) =>
-      y < 2 || y > 10 || x % 7 === 0 ? 1 : 0
-    )
-  );
-
-  for (const door of chapter.doors) grid[door.y][door.x] = 0;
-
-  // Mesas, bancos y camillas: también participan en las colisiones.
-  for (const [x, y] of [
-    [3, 3], [3, 9],
-    [10, 5], [11, 5], [10, 7], [11, 7],
-    [16, 4], [16, 5], [18, 9],
-    [24, 8], [25, 8]
-  ]) {
-    grid[y][x] = 2;
+  let renderer;
+  try {
+    renderer = new T.WebGLRenderer({ antialias: true });
+  } catch {
+    $("overlayTitle").textContent = "WebGL no disponible";
+    $("overlayText").textContent =
+      "Activa la aceleración gráfica del navegador para jugar.";
+    $("resume").hidden = true;
+    return;
   }
+
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = T.PCFSoftShadowMap;
+  renderer.outputColorSpace = T.SRGBColorSpace;
+  renderer.toneMapping = T.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
+  $("viewport").appendChild(renderer.domElement);
+
+  const camera = new T.PerspectiveCamera(65, innerWidth / innerHeight, .08, 100);
+  const raycaster = new T.Raycaster();
+  const solids = [];
+  const interactables = [];
+  const enemies = [];
+  const emergencyLights = [];
+  const doors = [];
+  const keys = new Set();
+  const clock = new T.Clock();
+
+  // ---------------------------------------------------------------
+  // 4. Estado global y jugador
+  // ---------------------------------------------------------------
+  const state = {
+    paused: true, dead: false, ending: false, finished: false,
+    time: 0, endTime: 0, stage: 0, toastTime: 0, damage: 0
+  };
 
   const player = {
-    ...chapter.start,
-    health: 100,
-    battery: 100,
-    stamina: 100,
-    flashlight: true,
-    crouch: false,
-    running: false,
-    exhausted: false,
-    moving: false,
-    fuse: false,
-    noise: 0
+    pos: new T.Vector3(0, 0, 3),
+    hp: 100, stamina: 100, battery: 100, cells: 1,
+    card: false, fuse: false, power: false,
+    flashlight: true, crouched: false, moving: false,
+    running: false, exhausted: false
   };
 
-  const enemies = chapter.enemySpawns.map((spawn, index) => ({
-    ...spawn,
-    home: { ...spawn },
-    target: { ...spawn },
-    angle: index * 2,
-    memory: 0,
-    attackCooldown: 0,
-    wanderTimer: index + 1,
-    phase: index * 1.7
-  }));
+  let yaw = 0;          // giro horizontal (rad)
+  let pitch = .06;      // inclinación vertical (rad)
+  let zoom = 3.5;       // distancia de la cámara al hombro
+  let selected = null;  // interactuable bajo el foco
 
-  const keys = new Set();
-  const FOV = Math.PI / 3;
-  const MAX_DISTANCE = 17;
-  const FLASH_RANGE = 10;
+  // Atajo de material
+  const mat = (color, extra = {}) =>
+    new T.MeshStandardMaterial({ color, roughness: .85, ...extra });
 
-  let width = 640;
-  let height = 360;
-  let projection = 550;
-  let depthBuffer = new Float32Array(width);
-  let mode = "intro";
-  let time = 0;
-  let lastFrame = 0;
-  let messageUntil = 0;
-  let hitFlash = 0;
-  let endingTime = 0;
-  let sectorIndex = -1;
-  let walkingPhase = 0;
-  let horizon = height / 2;
-
-  function resize() {
-    // Resolución interna limitada: reduce el coste del raycasting.
-    width = Math.min(800, Math.max(320, Math.floor(innerWidth * .6)));
-    height = Math.max(180, Math.round(width * innerHeight / innerWidth));
-    canvas.width = width;
-    canvas.height = height;
-    projection = width / (2 * Math.tan(FOV / 2));
-    depthBuffer = new Float32Array(width);
-  }
-
-  addEventListener("resize", resize);
-  resize();
-
-  function doorAt(x, y) {
-    return chapter.doors.find(door => door.x === x && door.y === y);
-  }
-
-  function tileAt(x, y) {
-    if (x < 0 || y < 0 || x >= chapter.width || y >= chapter.height) {
-      return 1;
-    }
-    const door = doorAt(x, y);
-    if (door && !door.open) return 3;
-    return grid[y][x];
-  }
-
-  function canOccupy(x, y, radius = .2) {
-    const minX = Math.floor(x - radius);
-    const maxX = Math.floor(x + radius);
-    const minY = Math.floor(y - radius);
-    const maxY = Math.floor(y + radius);
-
-    for (let cy = minY; cy <= maxY; cy++) {
-      for (let cx = minX; cx <= maxX; cx++) {
-        if (!tileAt(cx, cy)) continue;
-        const nearX = clamp(x, cx, cx + 1);
-        const nearY = clamp(y, cy, cy + 1);
-        if (Math.hypot(x - nearX, y - nearY) < radius) return false;
-      }
-    }
-    return true;
-  }
-
-  function moveEntity(entity, dx, dy, radius = .2) {
-    // Separar ejes permite deslizarse junto a las paredes.
-    if (canOccupy(entity.x + dx, entity.y, radius)) entity.x += dx;
-    if (canOccupy(entity.x, entity.y + dy, radius)) entity.y += dy;
-  }
-
-  // Raycasting DDA: avanza de celda en celda.
-  function castRay(angle, limit = MAX_DISTANCE) {
-    const dirX = Math.cos(angle);
-    const dirY = Math.sin(angle);
-
-    let mapX = Math.floor(player.x);
-    let mapY = Math.floor(player.y);
-
-    const deltaX = Math.abs(1 / (dirX || 1e-9));
-    const deltaY = Math.abs(1 / (dirY || 1e-9));
-    const stepX = dirX < 0 ? -1 : 1;
-    const stepY = dirY < 0 ? -1 : 1;
-
-    let sideX = (dirX < 0
-      ? player.x - mapX
-      : mapX + 1 - player.x) * deltaX;
-
-    let sideY = (dirY < 0
-      ? player.y - mapY
-      : mapY + 1 - player.y) * deltaY;
-
-    let side = 0;
-    let length = 0;
-    let tile = 0;
-
-    for (let i = 0; i < 100; i++) {
-      if (sideX < sideY) {
-        length = sideX;
-        sideX += deltaX;
-        mapX += stepX;
-        side = 0;
-      } else {
-        length = sideY;
-        sideY += deltaY;
-        mapY += stepY;
-        side = 1;
-      }
-
-      tile = tileAt(mapX, mapY);
-      if (tile || length >= limit) break;
-    }
-
-    const hitPosition = side === 0
-      ? player.y + dirY * length
-      : player.x + dirX * length;
-
-    return {
-      distance: Math.min(length, limit),
-      tile,
-      side,
-      texture: hitPosition - Math.floor(hitPosition),
-      mapX,
-      mapY
-    };
-  }
-
-  function clearSight(a, b) {
-    const d = distance(a, b);
-    const steps = Math.max(1, Math.ceil(d / .08));
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      const x = a.x + (b.x - a.x) * t;
-      const y = a.y + (b.y - a.y) * t;
-      if (tileAt(Math.floor(x), Math.floor(y))) return false;
-    }
-    return true;
-  }
-
-  // Búsqueda de ruta sencilla para que los enemigos rodeen muebles.
-  function nextWaypoint(enemy, target) {
-    const sx = Math.floor(enemy.x);
-    const sy = Math.floor(enemy.y);
-    const tx = Math.floor(target.x);
-    const ty = Math.floor(target.y);
-
-    if (sx === tx && sy === ty) return target;
-
-    const start = sy * chapter.width + sx;
-    const goal = ty * chapter.width + tx;
-    const parents = new Int32Array(chapter.width * chapter.height);
-    parents.fill(-1);
-    parents[start] = start;
-
-    const queue = [start];
-    let head = 0;
-
-    while (head < queue.length) {
-      const cell = queue[head++];
-      if (cell === goal) break;
-
-      const x = cell % chapter.width;
-      const y = Math.floor(cell / chapter.width);
-
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (tileAt(nx, ny)) continue;
-
-        const next = ny * chapter.width + nx;
-        if (parents[next] !== -1) continue;
-        parents[next] = cell;
-        queue.push(next);
-      }
-    }
-
-    if (parents[goal] === -1) return null;
-
-    let cell = goal;
-    while (parents[cell] !== start) {
-      cell = parents[cell];
-    }
-
-    return {
-      x: cell % chapter.width + .5,
-      y: Math.floor(cell / chapter.width) + .5
-    };
-  }
-
-  function say(text, duration = 4) {
-    ui.message.textContent = text;
-    messageUntil = time + duration;
-  }
-
-  function tryPointerLock() {
-    try {
-      const result = canvas.requestPointerLock?.();
-      if (result && result.catch) result.catch(() => {});
-    } catch {}
-  }
-
-  function resume() {
-    mode = "playing";
-    keys.clear();
-    ui.overlay.hidden = true;
-    audio.init(settings.volume);
-    audio.resume();
-    tryPointerLock();
-  }
-
-  function pause() {
-    if (mode !== "playing") return;
-    mode = "paused";
-    keys.clear();
-    audio.pause();
-    ui.title.textContent = "Señal suspendida";
-    ui.text.textContent =
-      "La partida está pausada. El peligro esperará hasta que continúes.";
-    ui.start.textContent = "Continuar";
-    ui.overlay.hidden = false;
-    document.exitPointerLock?.();
-  }
-
-  function finish(dead) {
-    mode = dead ? "dead" : "complete";
-    keys.clear();
-    audio.pause();
-    document.exitPointerLock?.();
-
-    ui.title.textContent = dead ? "Señal perdida" : "Fin del Capítulo 1";
-    ui.text.textContent = dead
-      ? "Tu traje ha dejado de transmitir. Evita correr cerca de los " +
-        "infectados y apaga la linterna para romper la persecución."
-      : "La compuerta cede. Al otro lado, las cápsulas siguen intactas.\n\n" +
-        "Entonces escuchas tu nombre desde un corredor vacío.\n\n" +
-        "Algo ha aprendido a hablar.\n\nContinuará...";
-    ui.start.textContent = dead ? "Reintentar" : "Jugar de nuevo";
-    ui.overlay.hidden = false;
-  }
-
-  ui.start.addEventListener("click", () => {
-    if (mode === "dead" || mode === "complete") {
-      location.reload();
-    } else {
-      resume();
-    }
-  });
-
-  canvas.addEventListener("click", () => {
-    if (mode === "playing") tryPointerLock();
-  });
-
-  document.addEventListener("pointerlockchange", () => {
-    if (!document.pointerLockElement && mode === "playing") pause();
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) pause();
-  });
-
-  addEventListener("blur", pause);
-
-  addEventListener("mousemove", event => {
-    if (mode === "playing" && document.pointerLockElement === canvas) {
-      player.angle = normalizeAngle(
-        player.angle + event.movementX * settings.sensitivity
-      );
-    }
-  });
-
-  const gameKeys = new Set([
-    "KeyW", "KeyA", "KeyS", "KeyD",
-    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-    "KeyQ", "KeyR", "KeyC", "KeyF", "KeyE",
-    "ShiftLeft", "ShiftRight", "Escape"
-  ]);
-
-  addEventListener("keydown", event => {
-    if (gameKeys.has(event.code)) event.preventDefault();
-
-    if (event.code === "Escape") {
-      pause();
-      return;
-    }
-    if (mode !== "playing") return;
-
-    keys.add(event.code);
-    if (event.repeat) return;
-
-    if (event.code === "KeyC") player.crouch = !player.crouch;
-
-    if (event.code === "KeyF") {
-      if (player.battery > 0) {
-        player.flashlight = !player.flashlight;
-        audio.effect("switch");
-      } else {
-        say("La batería está agotada. Busca una celda de energía.");
-      }
-    }
-
-    if (event.code === "KeyE") interact();
-  });
-
-  addEventListener("keyup", event => keys.delete(event.code));
-
-  const itemLabels = {
-    battery: "Recoger batería",
-    medkit: "Usar botiquín",
-    fuse: "Recoger fusible de emergencia",
-    log: "Leer registro de mantenimiento",
-    exit: "Abrir compuerta de escape"
+  const materials = {
+    wall: mat(0x26333e),
+    trim: mat(0x3c4a55, { metalness: .5 }),
+    floor: mat(0x151f28, { metalness: .3 }),
+    crate: mat(0x47504a),
+    pipe: mat(0x46535a, { metalness: .65 }),
+    blood: mat(0x491e21),
+    screen: mat(0x26444a, {
+      emissive: 0x3ea0ae, emissiveIntensity: .9
+    }),
+    amber: mat(0xb49b60, {
+      emissive: 0xc78a39, emissiveIntensity: .7
+    }),
+    dark: mat(0x101820)
   };
 
-  function interactionTarget() {
-    const candidates = [];
-
-    for (const door of chapter.doors) {
-      candidates.push({
-        x: door.x + .5,
-        y: door.y + .5,
-        kind: "door",
-        data: door
+  // ---------------------------------------------------------------
+  // 5. Utilidades de construcción
+  // ---------------------------------------------------------------
+  function box(x, y, z, w, h, d, material, solid = false) {
+    const mesh = new T.Mesh(new T.BoxGeometry(w, h, d), material);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    if (solid) {
+      solids.push({
+        mesh,
+        minX: x - w / 2, maxX: x + w / 2,
+        minZ: z - d / 2, maxZ: z + d / 2
       });
     }
-
-    for (const item of chapter.items) {
-      if (!item.taken) {
-        candidates.push({ ...item, kind: "item", data: item });
-      }
-    }
-
-    return candidates
-      .filter(target => {
-        const d = distance(player, target);
-        if (d > 1.65) return false;
-
-        const angle = normalizeAngle(
-          Math.atan2(target.y - player.y, target.x - player.x)
-          - player.angle
-        );
-        if (Math.abs(angle) > .8) return false;
-
-        // La celda de una puerta cerrada no debe bloquear su interacción.
-        const visiblePoint = target.kind === "door"
-          ? {
-              x: target.x + (player.x - target.x) * .6 / Math.max(d, .01),
-              y: target.y + (player.y - target.y) * .6 / Math.max(d, .01)
-            }
-          : target;
-
-        return clearSight(player, visiblePoint);
-      })
-      .sort((a, b) => distance(player, a) - distance(player, b))[0];
+    return mesh;
   }
 
-  function makeNoise(radius) {
-    for (const enemy of enemies) {
-      if (distance(player, enemy) < radius) {
-        enemy.target = { x: player.x, y: player.y };
-        enemy.memory = 5;
-      }
-    }
+  // Cartel tipo canvas (planos con texto)
+  function label(text, x, y, z, color = "#a5c6ce") {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#101c24";
+    ctx.fillRect(0, 0, 512, 128);
+    ctx.strokeStyle = color;
+    ctx.strokeRect(5, 5, 502, 118);
+    ctx.fillStyle = color;
+    ctx.font = "bold 32px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(text, 256, 77);
+    const texture = new T.CanvasTexture(canvas);
+    texture.colorSpace = T.SRGBColorSpace;
+    const sprite = new T.Sprite(new T.SpriteMaterial({ map: texture }));
+    sprite.position.set(x, y, z);
+    sprite.scale.set(3.5, .875, 1);
+    scene.add(sprite);
   }
 
-  function interact() {
-    const target = interactionTarget();
-    if (!target) return;
+  scene.add(new T.HemisphereLight(0x627e9e, 0x111317, .34));
 
-    if (target.kind === "door") {
-      const door = target.data;
+  // ---------------------------------------------------------------
+  // 6. Sectores de la nave (Pasillo A → Comedor → Enfermería → Bahía)
+  // ---------------------------------------------------------------
+  const sectors = [
+    { start: 0,  end: 20, name: "Pasillo A" },
+    { start: 20, end: 40, name: "Comedor" },
+    { start: 40, end: 60, name: "Enfermería" },
+    { start: 60, end: 80, name: "Bahía de escape" }
+  ];
 
-      if (door.locked && !player.fuse) {
-        say("Sin alimentación. Busca el fusible en la enfermería.");
-        return;
-      }
+  for (const sector of sectors) {
+    const middle = (sector.start + sector.end) / 2;
+    box(0, -.25, middle, 14, .5, 20, materials.floor);
+    box(0, 5.3, middle, 14, .6, 20, materials.dark);
+    box(-7.25, 2.5, middle, .5, 5, 20, materials.wall, true);
+    box(7.25, 2.5, middle, .5, 5, 20, materials.wall, true);
 
-      if (door.open) {
-        const center = { x: door.x + .5, y: door.y + .5 };
-        if ([player, ...enemies].some(entity => distance(entity, center) < .9)) {
-          say("El sensor detecta una obstrucción.");
-          return;
-        }
-      }
+    for (let z = sector.start + 2; z < sector.end; z += 4) {
+      box(-6.88, 2.5, z, .22, 5, .3, materials.trim);
+      box(6.88, 2.5, z, .22, 5, .3, materials.trim);
+      box(0, .008, z, 13.9, .016, .045, materials.trim);
+      box(-6.7, 4.1, z, .25, .25, 4, materials.pipe);
+      box(6.7, 3.8, z, .18, .18, 4, materials.pipe);
+    }
 
-      if (door.locked) {
-        door.locked = false;
-        say("Fusible instalado. Acceso a la bahía restaurado.");
-      }
+    label(sector.name.toUpperCase(), 0, 4.1, sector.start + 3);
 
-      door.open = !door.open;
+    // Luz roja de emergencia intermitente
+    const red = new T.PointLight(0xff3427, 15, 15, 2);
+    red.position.set(-4, 4.2, middle);
+    scene.add(red);
+    emergencyLights.push(red);
+    box(-4, 4.55, middle, .8, .14, .4, mat(0x9a241d, {
+      emissive: 0xff261b, emissiveIntensity: 2
+    }));
+
+    // Pantalla azul ambiental
+    const blue = new T.PointLight(0x5799b5, 9, 11, 2);
+    blue.position.set(5, 2.5, middle + 4);
+    scene.add(blue);
+    box(6.8, 2.5, middle + 4, .12, 1.1, 1.8, materials.screen);
+  }
+
+  // Muros de los extremos
+  box(0, 2.5, -.25, 14, 5, .5, materials.wall, true);
+  box(0, 2.5, 80.25, 14, 5, .5, materials.wall, true);
+
+  // ---------------------------------------------------------------
+  // 7. Interactuables y puertas
+  // ---------------------------------------------------------------
+  function addInteraction(mesh, title, action, radius = 2.1) {
+    const item = { mesh, title, action, radius, active: true };
+    interactables.push(item);
+    return item;
+  }
+
+  function toast(message) {
+    $("toast").textContent = message;
+    state.toastTime = 4;
+  }
+
+  const objectives = [
+    "Encuentra la tarjeta de acceso en el Pasillo A.",
+    "Abre el Comedor y recupera el fusible de emergencia.",
+    "Lleva el fusible al panel de la Enfermería.",
+    "Alcanza la Bahía de escape y activa la salida."
+  ];
+
+  function advance(stage) {
+    state.stage = Math.max(state.stage, stage);
+    $("objective").textContent = objectives[state.stage];
+  }
+
+  function createDoor(z, requirement, denied) {
+    // Marco lateral y dintel
+    box(-4.7, 2.5, z, 4.6, 5, .6, materials.wall, true);
+    box(4.7, 2.5, z, 4.6, 5, .6, materials.wall, true);
+    box(0, 4.65, z, 4.8, .7, .7, materials.trim);
+
+    // Hoja móvil
+    const mesh = box(0, 2.05, z, 4.8, 4.1, .45, materials.trim, true);
+    const collider = solids[solids.length - 1];
+    const door = { mesh, collider, open: false };
+    doors.push(door);
+
+    const item = addInteraction(mesh, "E / Abrir compuerta", () => {
+      if (!requirement()) return toast(denied);
+      door.open = true;
+      item.active = false;
+      solids.splice(solids.indexOf(collider), 1);
+      // Deslizar la hoja hacia un lado (animación simple)
+      mesh.userData.slideFrom = mesh.position.x;
+      mesh.userData.slideTo = -6.5;
+      mesh.userData.slideT = 0;
       audio.effect("door");
-      makeNoise(6);
-      return;
-    }
+    }, 3);
 
-    const item = target.data;
-
-    if (item.type === "battery") {
-      if (player.battery >= 99) {
-        say("Batería llena. Puedes dejar esta celda para después.");
-        return;
-      }
-      player.battery = Math.min(100, player.battery + 60);
-      say("Celda conectada: +60% de energía.");
-    } else if (item.type === "medkit") {
-      if (player.health >= 100) {
-        say("No necesitas tratamiento.");
-        return;
-      }
-      player.health = Math.min(100, player.health + 50);
-      say("Sellado de heridas completado.");
-    } else if (item.type === "fuse") {
-      player.fuse = true;
-      say("Fusible recuperado. Regresa a la compuerta de la bahía.", 5);
-    } else if (item.type === "log") {
-      say(
-        "REGISTRO: El contenedor B-17 se abrió desde dentro. " +
-        "Reaccionan al sonido y a la luz. No corras. No los ilumines.",
-        9
-      );
-    } else if (item.type === "exit") {
-      if (!player.fuse) {
-        say("Falta restaurar el circuito de emergencia.");
-        return;
-      }
-
-      mode = "ending";
-      endingTime = 0;
-      keys.clear();
-      ui.hint.textContent = "";
-      say("Descompresión completada. Abriendo compuerta...", 4);
-      audio.effect("door");
-      document.exitPointerLock?.();
-      return;
-    }
-
-    item.taken = true;
-    audio.effect("pickup");
+    // Pequeña pantalla indicadora al lado
+    box(2.65, 1.6, z - .4, .3, .5, .18, materials.screen);
   }
 
+  createDoor(20, () => player.card, "La compuerta requiere una tarjeta de acceso.");
+  createDoor(40, () => player.fuse, "Recupera el fusible del Comedor antes de continuar.");
+  createDoor(60, () => player.power, "Sin energía. Activa el panel de la Enfermería.");
+
+  // ---------------------------------------------------------------
+  // 8. Decoración (cajas, literas, mesas, camillas, manchas)
+  // ---------------------------------------------------------------
+  for (const z of [6, 13, 25, 34, 46, 56, 65, 73]) {
+    const side = z % 2 ? -1 : 1;
+    box(side * 5.4, .65, z, 1.7, 1.3, 1.5, materials.crate, true);
+    box(side * 5.4, 1.33, z, 1.8, .08, 1.6, materials.trim);
+  }
+
+  // Literas del sector de criosueño (Pasillo A)
+  for (const z of [7, 11, 15]) {
+    box(-5.6, .75, z, 2, .3, 2.6, materials.trim, true);
+    box(-5.6, 1, z, 1.8, .22, 2.3, mat(0x59646b));
+  }
+
+  // Mesas del comedor
+  for (const x of [-3.7, 3.7]) {
+    for (const z of [27, 33]) {
+      box(x, .65, z, 2.2, 1.3, 2.4, materials.dark, true);
+      box(x, 1.35, z, 2.7, .15, 2.8, materials.trim);
+      box(x, .42, z + 2, 2.3, .84, .5, materials.crate, true);
+    }
+  }
+
+  // Camillas de enfermería
+  for (const z of [45, 51, 56]) {
+    box(-4.6, .65, z, 2.2, 1.3, 2.7, materials.trim, true);
+    box(-4.6, 1.4, z, 2, .25, 2.5, mat(0x75878a));
+  }
+
+  // Manchas y cristales rotos (sin colisión para no atascar)
+  for (let i = 0; i < 28; i++) {
+    const z = 8 + i * 2.4;
+    const x = Math.sin(i * 8.3) * 5;
+    const stain = box(x, .015, z, .6 + (i % 3) * .25, .02, .45, materials.blood);
+    stain.rotation.y = i * 2.1;
+    if (i % 3 === 0) {
+      const shard = box(x + .6, .04, z, .24, .07, .4, materials.trim);
+      shard.rotation.y = i;
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // 9. Modelo humanoide modular (jugador e infectados)
+  // ---------------------------------------------------------------
+  function humanoid(infected = false) {
+    const root = new T.Group();
+    const body = new T.Group();
+    root.add(body);
+
+    const cloth = mat(infected ? 0x514c50 : 0x9a7450);
+    const skin = mat(infected ? 0xa5b6a8 : 0xc4aa8b);
+    const legsMaterial = mat(infected ? 0x303b3e : 0x303f4a);
+
+    function part(w, h, d, material, x, y, z, parent = body) {
+      const mesh = new T.Mesh(new T.BoxGeometry(w, h, d), material);
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      return mesh;
+    }
+
+    // Torso, cabeza y visor
+    part(.72, .8, .4, cloth, 0, 1.13, 0);
+    part(.48, .48, .45, skin, 0, 1.82, 0);
+    part(.36, .13, .04, materials.dark, 0, 1.87, .245);
+    if (!infected) {
+      part(.48, .57, .24, legsMaterial, 0, 1.2, -.3);   // mochila
+      part(.16, .09, .035, materials.screen, .2, 1.3, .225); // insignia
+    }
+
+    // Brazos y piernas con pivote para animar
+    const limbs = [];
+    for (const side of [-1, 1]) {
+      const arm = new T.Group();
+      arm.position.set(side * .53, 1.47, 0);
+      body.add(arm);
+      part(.27, .72, .3, cloth, 0, -.32, 0, arm);
+      limbs.push(arm);
+    }
+    for (const side of [-1, 1]) {
+      const leg = new T.Group();
+      leg.position.set(side * .21, .75, 0);
+      body.add(leg);
+      part(.3, .75, .35, legsMaterial, 0, -.375, 0, leg);
+      limbs.push(leg);
+    }
+
+    scene.add(root);
+    return { root, body, limbs };
+  }
+
+  const avatar = humanoid();
+  avatar.root.position.copy(player.pos);
+
+  // Cuerpos caídos para ambientar
+  for (const [x, z] of [[3, 12], [-5.5, 36], [4.7, 53]]) {
+    const corpse = humanoid(true);
+    corpse.root.position.set(x, .25, z);
+    corpse.root.rotation.z = Math.PI / 2;
+    corpse.root.rotation.y = z;
+  }
+
+  // ---------------------------------------------------------------
+  // 10. Objetos recogibles
+  // ---------------------------------------------------------------
+  function collectible(x, z, color, title, callback) {
+    const mesh = box(x, .9, z, .4, .25, .35, mat(color, {
+      emissive: color, emissiveIntensity: .7
+    }));
+    const glow = new T.PointLight(color, 1.5, 3);
+    glow.position.set(x, 1.1, z);
+    scene.add(glow);
+    const item = addInteraction(mesh, `E / ${title}`, () => {
+      if (callback() === false) return;
+      item.active = false;
+      mesh.visible = false;
+      glow.visible = false;
+      audio.effect("pickup");
+    });
+  }
+
+  // Tarjeta de acceso (objetivo 1)
+  collectible(3.2, 10, 0x62c3d3, "Recoger tarjeta de acceso", () => {
+    player.card = true;
+    advance(1);
+    toast("Tarjeta del oficial de carga recuperada. El Comedor está al norte.");
+  });
+
+  // Fusible de emergencia (objetivo 2)
+  collectible(-5.6, 30, 0xe5b466, "Recoger fusible", () => {
+    player.fuse = true;
+    advance(2);
+    toast("Fusible recuperado. Busca el panel azul en la Enfermería.");
+  });
+
+  // Celdas de batería repartidas por la nave
+  for (const [x, z] of [[4, 17], [5.5, 37], [4.5, 55], [-4, 71]]) {
+    collectible(x, z, 0xd7ad59, "Recoger celda de batería", () => {
+      player.cells++;
+      toast("Celda de batería añadida. Pulsa R para recargar.");
+    });
+  }
+
+  // Botiquines
+  for (const [x, z] of [[-3, 18], [4.7, 46], [-4, 67]]) {
+    collectible(x, z, 0x77c798, "Usar botiquín", () => {
+      if (player.hp >= 100) {
+        toast("Tu integridad ya está al máximo.");
+        return false;
+      }
+      player.hp = Math.min(100, player.hp + 45);
+      toast("Integridad restaurada.");
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // 11. Panel de energía y panel de evacuación
+  // ---------------------------------------------------------------
+  const panel = box(5.8, 1.4, 52, .65, 1.4, 1.1, materials.screen, true);
+  const powerInteraction = addInteraction(
+    panel,
+    "E / Instalar fusible y restablecer energía",
+    () => {
+      if (!player.fuse) return toast("Necesitas un fusible de emergencia.");
+      player.power = true;
+      powerInteraction.active = false;
+      advance(3);
+      audio.effect("door");
+      toast("Energía auxiliar activa. Acceso a la Bahía habilitado.");
+    },
+    2.5
+  );
+
+  // Compuerta final
+  box(0, 2, 79.7, 4.5, 4, .25, materials.trim);
+  const exitPanel = box(3, 1.4, 77, .6, 1.2, .6, materials.screen, true);
+  addInteraction(
+    exitPanel,
+    "E / Iniciar evacuación",
+    () => {
+      if (!player.power) return toast("La bahía no tiene energía.");
+      startEnding();
+    },
+    2.6
+  );
+  label("EVACUACIÓN / 01", 0, 4.3, 78, "#8cc5b7");
+
+  // ---------------------------------------------------------------
+  // 12. Colisiones y visibilidad
+  // ---------------------------------------------------------------
+  function blocked(x, z, radius) {
+    return solids.some(s =>
+      x + radius > s.minX && x - radius < s.maxX &&
+      z + radius > s.minZ && z - radius < s.maxZ
+    );
+  }
+
+  function move(pos, dx, dz, radius = .37) {
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / .15));
+    for (let i = 0; i < steps; i++) {
+      if (!blocked(pos.x + dx / steps, pos.z, radius)) pos.x += dx / steps;
+      if (!blocked(pos.x, pos.z + dz / steps, radius)) pos.z += dz / steps;
+    }
+  }
+
+  function visibleBetween(from, to) {
+    const direction = to.clone().sub(from);
+    const distance = direction.length();
+    if (distance < .01) return true;
+    raycaster.set(from, direction.normalize());
+    raycaster.near = 0;
+    raycaster.far = distance;
+    return raycaster.intersectObjects(solids.map(s => s.mesh), false).length === 0;
+  }
+
+  // ---------------------------------------------------------------
+  // 13. Linterna (foco real + cono translúcido)
+  // ---------------------------------------------------------------
+  const flashlight = new T.SpotLight(0xffdfac, 65, 23, .37, .65, 1.2);
+  flashlight.castShadow = true;
+  flashlight.shadow.mapSize.set(1024, 1024);
+  flashlight.shadow.bias = -.0005;
+  scene.add(flashlight, flashlight.target);
+
+  const beamGeometry = new T.ConeGeometry(1.8, 7, 24, 1, true);
+  beamGeometry.translate(0, -3.5, 0);
+  beamGeometry.rotateX(-Math.PI / 2);
+  const beam = new T.Mesh(beamGeometry, new T.MeshBasicMaterial({
+    color: 0xffdb9a, transparent: true, opacity: .025,
+    side: T.DoubleSide, depthWrite: false, blending: T.AdditiveBlending
+  }));
+  scene.add(beam);
+
+  // ---------------------------------------------------------------
+  // 14. Enemigos infectados
+  // ---------------------------------------------------------------
+  function spawnEnemy(x, z, minZ, maxZ) {
+    const model = humanoid(true);
+    model.root.position.set(x, 0, z);
+    enemies.push({
+      ...model, pos: model.root.position,
+      minZ, maxZ, direction: 1, memory: 0,
+      target: new T.Vector3(x, 0, z),
+      cooldown: 0, phase: Math.random() * 6
+    });
+  }
+
+  spawnEnemy(1.5, 29, 23, 37);   // Comedor
+  spawnEnemy(-1.5, 49, 43, 57);  // Enfermería
+  spawnEnemy(1.7, 70, 63, 76);   // Bahía
+
+  // ---------------------------------------------------------------
+  // 15. Animación del modelo modular
+  // ---------------------------------------------------------------
+  function animateModel(model, moving, running, crouched, phase) {
+    model.body.position.y = crouched ? -.45 :
+      Math.sin(phase * (moving ? 2 : .6)) * (moving ? .035 : .018);
+    model.body.rotation.x = crouched ? .23 : running ? .1 : 0;
+
+    const swing = moving
+      ? Math.sin(phase) * (running ? .8 : .45)
+      : .035 * Math.sin(phase);
+
+    model.limbs[0].rotation.x = swing;
+    model.limbs[1].rotation.x = -swing;
+    model.limbs[2].rotation.x = -swing;
+    model.limbs[3].rotation.x = swing;
+  }
+
+  // ---------------------------------------------------------------
+  // 16. Actualización del jugador
+  // ---------------------------------------------------------------
   function updatePlayer(dt) {
-    const forward =
-      Number(keys.has("KeyW") || keys.has("ArrowUp")) -
+    player.crouched = keys.has("ControlLeft") || keys.has("ControlRight");
+
+    let forward = Number(keys.has("KeyW") || keys.has("ArrowUp")) -
       Number(keys.has("KeyS") || keys.has("ArrowDown"));
-    const strafe =
-      Number(keys.has("KeyD") || keys.has("ArrowRight")) -
+    let side = Number(keys.has("KeyD") || keys.has("ArrowRight")) -
       Number(keys.has("KeyA") || keys.has("ArrowLeft"));
 
-    const turn = Number(keys.has("KeyR")) - Number(keys.has("KeyQ"));
-    player.angle = normalizeAngle(player.angle + turn * dt * 1.8);
+    const length = Math.hypot(forward, side);
+    player.moving = length > 0;
+    if (length) { forward /= length; side /= length; }
 
-    const inputLength = Math.hypot(forward, strafe);
-    const wantsRun = keys.has("ShiftLeft") || keys.has("ShiftRight");
+    // Gestión de resistencia
+    if (player.stamina <= 1) player.exhausted = true;
+    if (player.stamina > 30) player.exhausted = false;
+    player.running = player.moving && !player.crouched &&
+      !player.exhausted && (keys.has("ShiftLeft") || keys.has("ShiftRight"));
 
-    if (player.stamina <= 0) player.exhausted = true;
-    if (player.stamina >= 30) player.exhausted = false;
-
-    player.running = Boolean(
-      wantsRun && inputLength && !player.crouch && !player.exhausted
+    const speed = player.crouched ? 1.5 : player.running ? 5 : 2.9;
+    player.stamina = T.MathUtils.clamp(
+      player.stamina + (player.running ? -26 : 16) * dt, 0, 100
     );
 
-    const speed = player.crouch ? .92 : player.running ? 3.1 : 1.85;
-    const oldX = player.x;
-    const oldY = player.y;
+    // La cámara mira hacia +Z inicialmente; su derecha es -X.
+    const dx = (Math.sin(yaw) * forward - Math.cos(yaw) * side) * speed * dt;
+    const dz = (Math.cos(yaw) * forward + Math.sin(yaw) * side) * speed * dt;
+    move(player.pos, dx, dz);
 
-    if (inputLength > 0) {
-      const f = forward / inputLength;
-      const s = strafe / inputLength;
-      const dx = Math.cos(player.angle) * f - Math.sin(player.angle) * s;
-      const dy = Math.sin(player.angle) * f + Math.cos(player.angle) * s;
-      moveEntity(player, dx * speed * dt, dy * speed * dt, .21);
-    }
+    // Avatar sigue al jugador con giro suavizado
+    avatar.root.position.copy(player.pos);
+    const angularDifference = Math.atan2(
+      Math.sin(yaw - avatar.root.rotation.y),
+      Math.cos(yaw - avatar.root.rotation.y)
+    );
+    avatar.root.rotation.y += angularDifference * (1 - Math.exp(-12 * dt));
 
-    player.moving = Math.hypot(player.x - oldX, player.y - oldY) > .001;
+    animateModel(
+      avatar, player.moving, player.running, player.crouched,
+      state.time * (player.running ? 13 : player.crouched ? 5 : 8)
+    );
 
-    if (player.running && player.moving) {
-      player.stamina = Math.max(0, player.stamina - dt * 24);
-    } else {
-      player.stamina = Math.min(100, player.stamina + dt * 15);
-    }
-
-    player.noise = !player.moving ? 0
-      : player.crouch ? 1.1
-      : player.running ? 8 : 4.2;
-
+    // Consumo de batería por la linterna
     if (player.flashlight) {
-      player.battery = Math.max(0, player.battery - dt * .48);
+      player.battery = Math.max(0, player.battery - .52 * dt);
       if (player.battery === 0) {
         player.flashlight = false;
-        say("Batería agotada.");
+        toast("Batería agotada. Pulsa R si tienes una celda.");
       }
-    }
-
-    if (player.moving) {
-      walkingPhase += dt * (player.running ? 13 : player.crouch ? 5 : 8);
-    }
-
-    const sector = clamp(Math.floor(player.x / 7), 0, 3);
-    if (sector !== sectorIndex) {
-      sectorIndex = sector;
-      ui.sector.textContent = chapter.sectors[sector];
-
-      const messages = [
-        "La alarma continúa. Nadie responde por radio.",
-        "Las bandejas siguen servidas. No mires debajo de las mesas.",
-        "El fusible debe estar en el extremo norte de la enfermería.",
-        "Bahía de escape. Encuentra el panel de la compuerta."
-      ];
-      say(messages[sector], 5);
     }
   }
 
+  // ---------------------------------------------------------------
+  // 17. Actualización de la linterna
+  // ---------------------------------------------------------------
+  function updateLight() {
+    const forward = new T.Vector3(
+      Math.sin(yaw) * Math.cos(pitch),
+      -Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch)
+    );
+    const right = new T.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+
+    flashlight.position.copy(player.pos)
+      .add(new T.Vector3(0, player.crouched ? 1 : 1.5, 0))
+      .addScaledVector(right, .4);
+
+    flashlight.target.position.copy(flashlight.position)
+      .addScaledVector(forward, 12);
+
+    flashlight.visible = player.flashlight;
+    flashlight.intensity = player.battery < 15
+      ? 40 + Math.sin(state.time * 29) * 16
+      : 65;
+
+    beam.visible = player.flashlight;
+    beam.position.copy(flashlight.position);
+    beam.lookAt(flashlight.target.position);
+  }
+
+  // ---------------------------------------------------------------
+  // 18. Cámara en tercera persona (con colisión)
+  // ---------------------------------------------------------------
+  function updateCamera(dt) {
+    const forward = new T.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const right = new T.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+
+    const pivot = player.pos.clone().add(
+      new T.Vector3(0, player.crouched ? 1 : 1.6, 0)
+    );
+
+    const desired = pivot.clone()
+      .addScaledVector(forward, -zoom * Math.cos(pitch))
+      .addScaledVector(right, .65)
+      .add(new T.Vector3(0, .45 + Math.sin(pitch) * zoom, 0));
+
+    camera.position.lerp(desired, 1 - Math.exp(-10 * dt));
+
+    // Raycast DESPUÉS del suavizado: evita que la cámara entre en paredes
+    const direction = camera.position.clone().sub(pivot);
+    const distance = direction.length();
+    raycaster.set(pivot, direction.normalize());
+    raycaster.near = 0;
+    raycaster.far = distance + .18;
+    const hits = raycaster.intersectObjects(solids.map(s => s.mesh), false);
+    if (hits.length) {
+      camera.position.copy(pivot).addScaledVector(
+        direction, Math.max(.12, hits[0].distance - .2)
+      );
+    }
+
+    camera.position.y = T.MathUtils.clamp(camera.position.y, .25, 4.8);
+    camera.lookAt(
+      pivot.clone()
+        .addScaledVector(forward, 7)
+        .add(new T.Vector3(0, -Math.sin(pitch) * 7, 0))
+    );
+
+    // Ocultar el avatar si la cámara se pega al jugador
+    avatar.root.visible = camera.position.distanceTo(pivot) > .65;
+  }
+
+  // ---------------------------------------------------------------
+  // 19. IA de los infectados
+  // ---------------------------------------------------------------
   function updateEnemies(dt) {
-    let nearest = 99;
+    let nearest = 100;
 
     for (const enemy of enemies) {
-      const d = distance(enemy, player);
-      nearest = Math.min(nearest, d);
-      enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
+      const distance = enemy.pos.distanceTo(player.pos);
+      nearest = Math.min(nearest, distance);
+      enemy.cooldown -= dt;
 
-      const sight = d < 11 && clearSight(enemy, player);
-      const angleToEnemy = normalizeAngle(
-        Math.atan2(enemy.y - player.y, enemy.x - player.x) - player.angle
-      );
+      const eye = enemy.pos.clone().add(new T.Vector3(0, 1.5, 0));
+      const targetEye = player.pos.clone().add(new T.Vector3(0, 1.2, 0));
+      const clear = distance < 18 && visibleBetween(eye, targetEye);
 
-      const lit = player.flashlight &&
-        d < FLASH_RANGE &&
-        Math.abs(angleToEnemy) < .38 &&
-        sight;
+      // Rango de detección por ruido / luz
+      const noiseRange = player.running ? 11
+        : player.moving ? (player.crouched ? 1.4 : 4.5) : 0;
+      const sightRange = player.flashlight ? 14
+        : player.crouched ? 2.2 : 4.2;
 
-      // El ruido atraviesa particiones próximas, pero necesita una ruta.
-      const heard = d < player.noise && (sight || d < player.noise * .55);
-      const noticed = sight && d < (player.crouch ? 1.2 : 2.1);
-
-      if (lit || heard || noticed) {
-        enemy.memory = 5.5;
-        enemy.target = { x: player.x, y: player.y };
+      if (clear && (distance < sightRange || distance < noiseRange)) {
+        enemy.memory = 5;
+        enemy.target.copy(player.pos);
       } else {
         enemy.memory = Math.max(0, enemy.memory - dt);
       }
 
-      enemy.wanderTimer -= dt;
-      if (enemy.memory === 0 && enemy.wanderTimer <= 0) {
-        const x = enemy.home.x + (Math.random() - .5) * 4;
-        const y = enemy.home.y + (Math.random() - .5) * 4;
-        if (canOccupy(x, y, .23)) enemy.target = { x, y };
-        enemy.wanderTimer = 2 + Math.random() * 3;
-      }
-
-      const targetDistance = distance(enemy, enemy.target);
-      if (targetDistance > .18 && d > .58) {
-        let waypoint = enemy.target;
-        if (!clearSight(enemy, enemy.target)) {
-          waypoint = nextWaypoint(enemy, enemy.target);
-        }
-
-        if (waypoint) {
-          const angle = Math.atan2(
-            waypoint.y - enemy.y, waypoint.x - enemy.x
-          );
-          const speed = enemy.memory > 0 ? 1.13 : .35;
-          const erratic = Math.sin(time * 8 + enemy.phase) * .12;
-          enemy.angle = angle;
-          moveEntity(
-            enemy,
-            Math.cos(angle + erratic) * speed * dt,
-            Math.sin(angle + erratic) * speed * dt,
-            .22
-          );
-        }
-      }
-
-      if (d < .85 && sight && enemy.attackCooldown === 0) {
-        player.health = Math.max(0, player.health - 26);
-        enemy.attackCooldown = 1.15;
-        hitFlash = 1;
-        audio.effect("attack");
-        say("¡Contacto! Aléjate del infectado.", 2);
-
-        if (player.health <= 0) {
-          finish(true);
-          break;
-        }
-      }
-    }
-
-    return nearest;
-  }
-
-  function updateHUD(dt) {
-    hitFlash = Math.max(0, hitFlash - dt * 1.8);
-
-    ui.health.value = player.health;
-    ui.healthText.textContent = Math.ceil(player.health);
-    ui.battery.value = player.battery;
-    ui.batteryText.textContent =
-      `${Math.ceil(player.battery)}% ${player.flashlight ? "ON" : "OFF"}`;
-    ui.stamina.value = player.stamina;
-    ui.stance.textContent = player.crouch
-      ? "AGACHADO" : player.running ? "CORRIENDO" : "DE PIE";
-
-    ui.objective.textContent = player.fuse
-      ? "Restaura la puerta de la bahía y activa la salida."
-      : "Busca un fusible en la enfermería.";
-
-    ui.damage.style.opacity = hitFlash;
-    const stress = 1 - player.stamina / 100;
-    ui.vignette.style.opacity =
-      .68 + stress * (.2 + Math.sin(time * 5) * .1);
-
-    document.body.classList.toggle("critical", player.health < 35);
-    document.body.classList.toggle("crouching", player.crouch);
-
-    if (time > messageUntil) ui.message.textContent = "";
-
-    const target = interactionTarget();
-    if (!target) {
-      ui.hint.textContent = "";
-    } else if (target.kind === "door") {
-      ui.hint.textContent = target.data.locked
-        ? "[E] Panel de energía - fusible requerido"
-        : `[E] ${target.data.open ? "Cerrar" : "Abrir"} compuerta`;
-    } else {
-      ui.hint.textContent = `[E] ${itemLabels[target.data.type]}`;
-    }
-  }
-
-  // Texturas procedurales: paneles, tuberías y manchas.
-  function makeWallTexture(type) {
-    const texture = document.createElement("canvas");
-    texture.width = texture.height = 64;
-    const c = texture.getContext("2d");
-
-    c.fillStyle = type === 3 ? "#59636a"
-      : type === 2 ? "#55534a" : "#606970";
-    c.fillRect(0, 0, 64, 64);
-
-    for (let i = 0; i < 700; i++) {
-      c.fillStyle = `rgba(0,0,0,${Math.random() * .15})`;
-      c.fillRect(Math.random() * 64, Math.random() * 64, 2, 2);
-    }
-
-    c.strokeStyle = "#222a30";
-    c.lineWidth = 2;
-    c.strokeRect(1, 1, 62, 62);
-    c.strokeRect(5, 7, 54, 49);
-
-    if (type === 3) {
-      c.fillStyle = "#20272c";
-      c.fillRect(30, 0, 4, 64);
-      c.fillStyle = "#ac8b46";
-      for (let x = 0; x < 64; x += 12) {
-        c.fillRect(x, 7, 6, 5);
-        c.fillRect(x, 52, 6, 5);
-      }
-      c.fillStyle = "#5d2725";
-      c.fillRect(43, 25, 9, 15);
-    } else if (type === 2) {
-      c.fillStyle = "#939087";
-      c.fillRect(4, 5, 56, 9);
-      c.fillStyle = "#362327";
-      c.fillRect(8, 20, 25, 13);
-    } else {
-      c.fillStyle = "#313d44";
-      c.fillRect(8, 0, 7, 64);
-      c.fillStyle = "#89949a";
-      c.fillRect(9, 0, 2, 64);
-      c.fillStyle = "#6e181a";
-      c.beginPath();
-      c.ellipse(43, 45, 12, 5, -.5, 0, Math.PI * 2);
-      c.fill();
-      c.fillRect(44, 45, 2, 16);
-    }
-
-    for (const x of [4, 59]) {
-      for (const y of [4, 59]) {
-        c.fillStyle = "#a0a5a6";
-        c.fillRect(x, y, 2, 2);
-      }
-    }
-    return texture;
-  }
-
-  const wallTextures = {
-    1: makeWallTexture(1),
-    2: makeWallTexture(2),
-    3: makeWallTexture(3)
-  };
-
-  function makeSprite(type) {
-    const sprite = document.createElement("canvas");
-    sprite.width = 64;
-    sprite.height = 96;
-    const c = sprite.getContext("2d");
-
-    if (type === "enemy") {
-      c.fillStyle = "#333e45";
-      c.beginPath();
-      c.moveTo(21, 34);
-      c.lineTo(44, 32);
-      c.lineTo(48, 65);
-      c.lineTo(20, 65);
-      c.closePath();
-      c.fill();
-
-      c.strokeStyle = "#9eaaa2";
-      c.lineWidth = 7;
-      c.beginPath();
-      c.moveTo(24, 38);
-      c.lineTo(12, 61);
-      c.lineTo(8, 77);
-      c.moveTo(41, 37);
-      c.lineTo(53, 56);
-      c.lineTo(58, 71);
-      c.stroke();
-
-      c.strokeStyle = "#465059";
-      c.lineWidth = 9;
-      c.beginPath();
-      c.moveTo(27, 62);
-      c.lineTo(24, 91);
-      c.moveTo(41, 61);
-      c.lineTo(46, 91);
-      c.stroke();
-
-      c.fillStyle = "#b2bab0";
-      c.beginPath();
-      c.ellipse(34, 22, 10, 14, .2, 0, Math.PI * 2);
-      c.fill();
-
-      c.fillStyle = "#202325";
-      c.fillRect(27, 19, 5, 4);
-      c.fillRect(36, 19, 5, 4);
-      c.fillStyle = "#5a1b1b";
-      c.fillRect(32, 27, 7, 9);
-      c.fillRect(31, 42, 10, 20);
-    } else {
-      const colors = {
-        battery: "#bda569",
-        medkit: "#90a99a",
-        fuse: "#d1b578",
-        log: "#759da6",
-        exit: "#76a599"
-      };
-
-      c.fillStyle = "#172329";
-      c.fillRect(12, 26, 40, 53);
-      c.strokeStyle = colors[type];
-      c.lineWidth = 3;
-      c.strokeRect(12, 26, 40, 53);
-      c.fillStyle = colors[type];
-
-      if (type === "medkit") {
-        c.fillRect(28, 39, 9, 27);
-        c.fillRect(19, 48, 27, 9);
-      } else if (type === "battery" || type === "fuse") {
-        c.fillRect(23, 37, 18, 31);
-        c.fillRect(28, 32, 8, 5);
-      } else {
-        c.fillRect(18, 35, 28, 20);
-        c.fillStyle = "#b2c7bf";
-        c.fillRect(20, 61, 22, 3);
-      }
-    }
-
-    return sprite;
-  }
-
-  const sprites = {};
-  for (const type of ["enemy", "battery", "medkit", "fuse", "log", "exit"]) {
-    sprites[type] = makeSprite(type);
-  }
-
-  function flashlightPower(angle, d) {
-    if (!player.flashlight || d >= FLASH_RANGE) return 0;
-    const cone = Math.pow(Math.max(0, 1 - Math.abs(angle) / .42), 1.3);
-    const flicker = player.battery < 15
-      ? .7 + .3 * Math.sin(time * 31) ** 2 : 1;
-    return cone * Math.max(0, 1 - d / FLASH_RANGE) * flicker;
-  }
-
-  function drawWalls() {
-    const cameraHeight = player.crouch ? .31 : .5;
-    const pulse = Math.pow(Math.max(0, Math.sin(time * 2)), 8);
-
-    ctx.fillStyle = "#030507";
-    ctx.fillRect(0, 0, width, height);
-
-    const floorGradient = ctx.createLinearGradient(0, horizon, 0, height);
-    floorGradient.addColorStop(0, "#030405");
-    floorGradient.addColorStop(1, player.flashlight ? "#27221a" : "#090b0d");
-    ctx.fillStyle = floorGradient;
-    ctx.fillRect(0, horizon, width, height - horizon);
-
-    // Juntas del suelo con perspectiva.
-    ctx.strokeStyle = player.flashlight ? "#66563a25" : "#31404918";
-    for (let d = 1; d < 14; d += .65) {
-      const y = horizon + projection * cameraHeight / d;
-      if (y >= height) continue;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
-    }
-
-    for (let x = 0; x < width; x++) {
-      const offset = Math.atan((x - width / 2) / projection);
-      const hit = castRay(player.angle + offset);
-      const corrected = Math.max(.05, hit.distance * Math.cos(offset));
-      depthBuffer[x] = corrected;
-
-      const wallHeight = projection / corrected;
-      const bottom = horizon + wallHeight * cameraHeight;
-      const top = bottom - wallHeight;
-      const light = flashlightPower(offset, hit.distance);
-
-      const texture = wallTextures[hit.tile] || wallTextures[1];
-      ctx.drawImage(
-        texture,
-        Math.floor(hit.texture * 63), 0, 1, 64,
-        x, top, 1, wallHeight
-      );
-
-      const brightness = clamp(
-        .025 + light * .88 + pulse * .025 - hit.side * .015,
-        .015, .93
-      );
-      ctx.fillStyle = `rgba(0,0,0,${1 - brightness})`;
-      ctx.fillRect(x, top, 1, wallHeight);
-
-      // Tinte ámbar del haz y niebla atmosférica simulada.
-      ctx.fillStyle = `rgba(130,82,25,${light * .13})`;
-      ctx.fillRect(x, top, 1, wallHeight);
-      ctx.fillStyle = `rgba(13,18,22,${Math.min(.32, corrected * .018)})`;
-      ctx.fillRect(x, top, 1, wallHeight);
-
-      // Testigos de emergencia: no iluminan por completo la habitación.
-      if (hit.texture > .42 && hit.texture < .58 && hit.tile === 1) {
-        ctx.fillStyle = `rgba(177,24,20,${.12 + pulse * .65})`;
-        ctx.fillRect(x, top + wallHeight * .15, 1, wallHeight * .035);
-      }
-    }
-  }
-
-  function drawSprites() {
-    const objects = [
-      ...enemies.map(enemy => ({ ...enemy, type: "enemy" })),
-      ...chapter.items.filter(item => !item.taken)
-    ].sort((a, b) => distance(player, b) - distance(player, a));
-
-    for (const object of objects) {
-      const dx = object.x - player.x;
-      const dy = object.y - player.y;
-      const d = Math.hypot(dx, dy);
-      const angle = normalizeAngle(Math.atan2(dy, dx) - player.angle);
-
-      if (Math.abs(angle) > FOV || d < .12 || d > MAX_DISTANCE) continue;
-
-      const forward = d * Math.cos(angle);
-      const screenX = width / 2 + Math.tan(angle) * projection;
-      const enemy = object.type === "enemy";
-      const scale = enemy ? .9 : object.type === "exit" ? .85 : .5;
-      const spriteHeight = projection * scale / forward;
-      const spriteWidth = spriteHeight * 2 / 3;
-      const cameraHeight = player.crouch ? .31 : .5;
-      const bottom = horizon + projection * cameraHeight / forward;
-
-      const sway = enemy
-        ? Math.sin(time * 7 + object.phase) * spriteWidth * .045 : 0;
-
-      const left = screenX - spriteWidth / 2 + sway;
-      const top = bottom - spriteHeight;
-      const light = flashlightPower(angle, d);
-
-      ctx.globalAlpha = clamp(
-        (enemy ? .07 : .3) + light * .95, 0, 1
-      );
-
-      const texture = sprites[object.type];
-      const from = Math.max(0, Math.floor(left));
-      const to = Math.min(width, Math.ceil(left + spriteWidth));
-
-      for (let x = from; x < to; x++) {
-        if (forward >= depthBuffer[x]) continue;
-        const textureX = clamp(
-          Math.floor((x - left) / spriteWidth * texture.width),
-          0, texture.width - 1
+      // Patrulla si no hay memoria de jugador
+      if (enemy.memory <= 0) {
+        enemy.target.set(
+          1.2 * Math.sin(enemy.phase),
+          0,
+          enemy.direction > 0 ? enemy.maxZ : enemy.minZ
         );
+        if (enemy.pos.distanceTo(enemy.target) < .7) enemy.direction *= -1;
+      }
 
-        ctx.drawImage(
-          texture, textureX, 0, 1, texture.height,
-          x, top, 1, spriteHeight
-        );
+      const direction = enemy.target.clone().sub(enemy.pos);
+      const moving = direction.length() > .35;
+      if (moving) {
+        direction.normalize();
+        const speed = enemy.memory > 0 ? 2.05 : .85;
+        const old = enemy.pos.clone();
+        move(enemy.pos, direction.x * speed * dt, direction.z * speed * dt, .4);
+
+        // Desvío si se queda atascado en un obstáculo
+        if (old.distanceTo(enemy.pos) < speed * dt * .2) {
+          move(enemy.pos,
+            -direction.z * speed * dt,
+            direction.x * speed * dt, .4);
+        }
+        enemy.root.rotation.y = Math.atan2(direction.x, direction.z);
+      }
+
+      animateModel(enemy, moving, false, false, state.time * 7 + enemy.phase);
+      enemy.body.rotation.z = Math.sin(state.time * 4 + enemy.phase) * .075;
+
+      // Ataque
+      if (distance < 1.2 && clear && enemy.cooldown <= 0) {
+        enemy.cooldown = 1.2;
+        player.hp = Math.max(0, player.hp - 24);
+        state.damage = 1;
+        audio.effect("hit");
+        if (player.hp === 0) {
+          die();
+          return 1;
+        }
       }
     }
 
-    ctx.globalAlpha = 1;
+    return Math.max(0, 1 - nearest / 15);
   }
 
-  function drawAtmosphere() {
-    // Partículas dentro del cono de la linterna.
-    if (player.flashlight) {
-      ctx.fillStyle = "#e7c487";
-      for (let i = 0; i < 30; i++) {
-        const x = width / 2 + Math.sin(i * 7.3 + time * .12) * width * .27;
-        const y = (i * 39 + time * (3 + i % 4)) % height;
-        ctx.globalAlpha = .035 + (i % 3) * .02;
-        ctx.fillRect(x, y, 1, 1);
-      }
-      ctx.globalAlpha = 1;
+  // ---------------------------------------------------------------
+  // 20. Detección de interactuable bajo la mirada
+  // ---------------------------------------------------------------
+  function updateInteraction() {
+    selected = null;
+    let nearest = Infinity;
+    const eye = player.pos.clone().add(new T.Vector3(0, 1.25, 0));
+
+    for (const item of interactables) {
+      if (!item.active) continue;
+      const p = item.mesh.position;
+      const distance = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
+      if (distance > item.radius || distance >= nearest) continue;
+
+      // No permitir interactuar a través de una pared
+      const target = p.clone();
+      const direction = target.clone().sub(eye);
+      raycaster.set(eye, direction.clone().normalize());
+      raycaster.near = 0;
+      raycaster.far = direction.length();
+      const hits = raycaster.intersectObjects(solids.map(s => s.mesh), false);
+      if (hits.length && hits[0].object !== item.mesh) continue;
+
+      selected = item;
+      nearest = distance;
     }
 
-    // Marco inferior del casco.
-    ctx.fillStyle = "#050709";
-    ctx.beginPath();
-    ctx.moveTo(0, height);
-    ctx.lineTo(0, height * .92);
-    ctx.quadraticCurveTo(width / 2, height * 1.05, width, height * .92);
-    ctx.lineTo(width, height);
-    ctx.fill();
+    $("interaction").style.display = selected ? "block" : "none";
+    $("interaction").textContent = selected ? selected.title : "";
   }
 
-  function drawEnding() {
-    const progress = clamp(endingTime / 3, 0, 1);
-    ctx.fillStyle = "#050809";
-    ctx.fillRect(0, 0, width, height);
-
-    const opening = width * .6 * progress;
-    ctx.fillStyle = "#516462";
-    ctx.fillRect(width / 2 - opening / 2, 0, opening, height);
-
-    const fog = ctx.createRadialGradient(
-      width / 2, height / 2, 5,
-      width / 2, height / 2, width * .6
+  // ---------------------------------------------------------------
+  // 21. HUD
+  // ---------------------------------------------------------------
+  function updateHUD(dt, proximity) {
+    const sector = sectors.find(s =>
+      player.pos.z >= s.start && player.pos.z < s.end
     );
-    fog.addColorStop(0, "#a0b1a133");
-    fog.addColorStop(1, "#000000ee");
-    ctx.fillStyle = fog;
-    ctx.fillRect(0, 0, width, height);
+    $("sector").textContent = sector ? sector.name : "Bahía de escape";
 
-    if (endingTime > 3) {
-      // Presencia inmóvil entre las sombras.
-      ctx.fillStyle = "#020303";
-      ctx.beginPath();
-      ctx.ellipse(width * .72, height * .47,
-        width * .045, height * .2, -.1, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#c5c6a9";
-      ctx.fillRect(width * .708, height * .37, 3, 2);
-      ctx.fillRect(width * .73, height * .37, 3, 2);
-    }
+    $("hp").value = player.hp;
+    $("hpText").textContent = Math.ceil(player.hp);
+    $("stamina").value = player.stamina;
+    $("battery").value = player.battery;
+    $("batteryText").textContent =
+      `${Math.ceil(player.battery)}% / ${player.flashlight ? "ON" : "OFF"}`;
+    $("inventory").textContent =
+      `Celdas: ${player.cells}` +
+      (player.card ? " · Tarjeta" : "") +
+      (player.fuse ? " · Fusible" : "");
 
-    if (endingTime > 5) {
-      ctx.fillStyle = `rgba(0,0,0,${clamp((endingTime - 5) / 1.5, 0, 1)})`;
-      ctx.fillRect(0, 0, width, height);
+    $("threat").style.opacity = proximity > .35 ? 1 : 0;
+
+    state.toastTime = Math.max(0, state.toastTime - dt);
+    $("toast").style.opacity = state.toastTime > 0 ? 1 : 0;
+
+    state.damage = Math.max(0, state.damage - dt * 1.6);
+    $("damage").style.opacity = state.damage * .8;
+
+    document.body.classList.toggle("exhausted", player.stamina < 25);
+  }
+
+  // ---------------------------------------------------------------
+  // 22. Pausa, muerte, final y reinicio
+  // ---------------------------------------------------------------
+  function isPlayable() {
+    return !state.paused && !state.ending && !state.dead && !state.finished;
+  }
+
+  function pause() {
+    if (state.paused || state.dead || state.finished || state.ending) return;
+    state.paused = true;
+    keys.clear();
+    selected = null;
+    $("interaction").style.display = "none";
+    $("overlayTitle").textContent = "Pausa";
+    $("overlayText").textContent =
+      "La nave espera. Reanuda cuando estés listo.";
+    $("resume").hidden = false;
+    $("resume").textContent = "Continuar";
+    $("restart").hidden = true;
+    $("overlay").hidden = false;
+    audio.suspend();
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  function resumeGame() {
+    if (state.dead || state.finished || state.ending) return;
+    state.paused = false;
+    $("overlay").hidden = true;
+    // Consumir el tiempo acumulado mientras estaba pausado
+    clock.getDelta();
+    audio.start();
+    if (renderer.domElement.requestPointerLock) {
+      const p = renderer.domElement.requestPointerLock();
+      // Algunos navegadores devuelven promesa; ignora errores
+      if (p && typeof p.catch === "function") p.catch(() => {});
     }
   }
 
-  function render() {
-    if (mode === "ending") {
-      drawEnding();
+  function die() {
+    if (state.dead) return;
+    state.dead = true;
+    keys.clear();
+    selected = null;
+    $("interaction").style.display = "none";
+    $("overlayTitle").textContent = "Has caído";
+    $("overlayText").textContent =
+      "El virus reclama otro cuerpo en la Kepler-9. Vuelve a intentarlo.";
+    $("resume").hidden = true;
+    $("restart").hidden = false;
+    $("overlay").hidden = false;
+    audio.suspend();
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  function startEnding() {
+    if (state.ending || state.finished) return;
+    state.ending = true;
+    state.endTime = 0;
+    keys.clear();
+    selected = null;
+    $("interaction").style.display = "none";
+    $("threat").style.opacity = 0;
+    audio.effect("door");
+  }
+
+  // ---------------------------------------------------------------
+  // 23. Entradas (teclado, mouse, pointer lock)
+  // ---------------------------------------------------------------
+  addEventListener("keydown", e => {
+    // Prevenir scroll con flechas / espacio
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"]
+        .includes(e.code)) e.preventDefault();
+
+    if (e.code === "Escape") {
+      if (isPlayable()) pause();
       return;
     }
 
-    horizon = height / 2 +
-      (player.moving && mode === "playing"
-        ? Math.sin(walkingPhase) * (player.running ? 4 : 2)
-        : Math.sin(time * 1.5));
+    if (!isPlayable()) return;
+    keys.add(e.code);
 
-    drawWalls();
-    drawSprites();
-    drawAtmosphere();
+    if (e.code === "KeyE" && selected) selected.action();
+    if (e.code === "KeyF") toggleFlashlight();
+    if (e.code === "KeyR") reloadBattery();
+  });
+
+  addEventListener("keyup", e => keys.delete(e.code));
+
+  addEventListener("mousemove", e => {
+    if (!isPlayable()) return;
+    if (document.pointerLockElement !== renderer.domElement) return;
+    const s = settings.sensitivity * .0022;
+    yaw -= e.movementX * s;
+    pitch = T.MathUtils.clamp(pitch + e.movementY * s, -.85, .85);
+  });
+
+  addEventListener("wheel", e => {
+    if (!isPlayable()) return;
+    zoom = T.MathUtils.clamp(zoom + e.deltaY * .002, 2, 6);
+  }, { passive: true });
+
+  addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // Reclamar pointer lock al hacer click sobre el canvas
+  renderer.domElement.addEventListener("click", () => {
+    if (isPlayable() && document.pointerLockElement !== renderer.domElement) {
+      const p = renderer.domElement.requestPointerLock?.();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    }
+  });
+
+  // Si el usuario sale del pointer lock, pausar
+  document.addEventListener("pointerlockchange", () => {
+    if (document.pointerLockElement !== renderer.domElement) {
+      if (isPlayable()) pause();
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // 24. Acciones rápidas
+  // ---------------------------------------------------------------
+  function toggleFlashlight() {
+    if (!player.flashlight && player.battery <= 0) {
+      toast("Batería agotada. Recarga con R.");
+      return;
+    }
+    player.flashlight = !player.flashlight;
+    audio.effect("switch");
   }
 
-  function frame(timestamp) {
-    const dt = Math.min(.04, (timestamp - lastFrame) / 1000 || .016);
-    lastFrame = timestamp;
+  function reloadBattery() {
+    if (player.battery > 80) {
+      toast("La batería ya está cargada.");
+      return;
+    }
+    if (player.cells <= 0) {
+      toast("No tienes celdas de repuesto.");
+      return;
+    }
+    player.cells--;
+    player.battery = 100;
+    audio.effect("switch");
+    toast("Batería recargada.");
+  }
 
-    if (mode === "playing") {
-      time += dt;
-      updatePlayer(dt);
-      const nearest = updateEnemies(dt);
-      updateHUD(dt);
+  // ---------------------------------------------------------------
+  // 25. Botones del menú interno
+  // ---------------------------------------------------------------
+  $("resume").addEventListener("click", resumeGame);
+  $("restart").addEventListener("click", () => location.reload());
 
-      if (mode === "playing") {
-        audio.update(dt, {
-          nearest,
-          health: player.health,
-          stamina: player.stamina,
-          moving: player.moving,
-          crouch: player.crouch,
-          running: player.running
-        });
-      }
-    } else if (mode === "ending") {
-      const previous = endingTime;
-      endingTime += dt;
-      time += dt;
+  // ---------------------------------------------------------------
+  // 26. Bucle principal
+  // ---------------------------------------------------------------
+  function animate() {
+    requestAnimationFrame(animate);
 
-      if (previous < 3 && endingTime >= 3) {
-        audio.effect("ending");
-        say("...¿Quién ha dicho mi nombre?", 3);
-      }
+    const dt = Math.min(.05, clock.getDelta());
 
-      if (endingTime >= 6.8) finish(false);
+    // En pausa seguimos renderizando la escena detrás del overlay
+    if (state.paused) {
+      renderer.render(scene, camera);
+      return;
     }
 
-    render();
-    requestAnimationFrame(frame);
+    state.time += dt;
+
+    // --- Cinemática de fin de capítulo ---
+    if (state.ending) {
+      state.endTime += dt;
+      const alpha = Math.min(1, state.endTime * .55);
+      // Fundido a blanco cálido + negro en el overlay de daño
+      $("damage").style.background =
+        `radial-gradient(ellipse, rgba(250,235,205,${alpha * .9}), rgba(0,0,0,${alpha}))`;
+      $("damage").style.opacity = 1;
+
+      // La cámara se aleja lentamente hacia arriba
+      zoom = Math.min(6, zoom + dt * .4);
+      updateLight();
+      updateCamera(dt);
+
+      if (state.endTime > 3 && !state.finished) {
+        state.finished = true;
+        $("overlayTitle").textContent = "Capítulo 1 completado";
+        $("overlayText").textContent =
+          "Lograste abrir la compuerta de evacuación... pero algo " +
+          "te observa desde las sombras. El Capítulo 2 te espera.";
+        $("resume").hidden = true;
+        $("restart").hidden = false;
+        $("overlay").hidden = false;
+        if (document.pointerLockElement) document.exitPointerLock();
+      }
+
+      renderer.render(scene, camera);
+      return;
+    }
+
+    // --- Actualizaciones normales ---
+    updatePlayer(dt);
+    updateLight();
+    updateCamera(dt);
+
+    const proximity = updateEnemies(dt);
+
+    // Si morimos durante la actualización de enemigos, cortamos aquí
+    if (state.dead) {
+      renderer.render(scene, camera);
+      return;
+    }
+
+    updateInteraction();
+    updateHUD(dt, proximity);
+
+    // Parpadeo de luces de emergencia
+    for (const light of emergencyLights) {
+      light.intensity = 15 + Math.sin(state.time * 7 + light.position.z) * 6;
+    }
+
+    // Animar puertas que se abren
+    for (const door of doors) {
+      if (!door.open || door.mesh.userData.slideT === undefined) continue;
+      door.mesh.userData.slideT = Math.min(
+        1, door.mesh.userData.slideT + dt * 1.8
+      );
+      const t = door.mesh.userData.slideT;
+      const ease = 1 - Math.pow(1 - t, 3);
+      door.mesh.position.x = door.mesh.userData.slideFrom +
+        (door.mesh.userData.slideTo - door.mesh.userData.slideFrom) * ease;
+    }
+
+    // Audio dinámico (ambiente, pasos, latidos, gruñidos)
+    audio.update(dt, player, proximity);
+
+    renderer.render(scene, camera);
   }
 
-  requestAnimationFrame(frame);
+  // ---------------------------------------------------------------
+  // 27. Arranque
+  // ---------------------------------------------------------------
+  // Estado inicial: pausa con overlay (ya viene visible en HTML).
+  $("overlayTitle").textContent = "Protocolo Eclipse";
+  $("overlayText").textContent =
+    "Despiertas en el Pasillo A. Recupera una tarjeta, restablece " +
+    "la energía y llega a la bahía. La luz y el ruido atraen a los infectados.";
+  $("resume").hidden = false;
+  $("resume").textContent = "Entrar en la nave";
+  $("restart").hidden = true;
+
+  animate();
 })();

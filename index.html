@@ -1,227 +1,145 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Eclipse - Capítulo 1</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ECLIPSE | Capítulo 1</title>
   <style>
-    :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background: #030507;
-      color: #cbd1d5;
-      font: 16px system-ui, sans-serif;
-      overflow-x: hidden;
+      margin: 0; min-height: 100vh; overflow: hidden;
+      background: #05080c; color: #e6edf1;
+      font-family: system-ui, sans-serif;
     }
-    #stars {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      z-index: -1;
+    .scene {
+      position: fixed; inset: 0; overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% 55%, #23313a33, transparent 55%),
+        linear-gradient(90deg, #030507, #111b22 50%, #030507);
+      perspective: 500px;
+    }
+    .corridor {
+      position: absolute; inset: -40% 18%;
+      transform: rotateX(62deg);
+      background:
+        repeating-linear-gradient(0deg, transparent 0 110px, #50616c55 112px 117px),
+        repeating-linear-gradient(90deg, #142027 0 110px, #070b10 112px 120px);
+      box-shadow: 0 0 100px #b51e1633;
+    }
+    .door {
+      position: absolute; width: 180px; height: 290px;
+      top: 28%; left: calc(50% - 90px);
+      background: linear-gradient(90deg, #152027, #05080b 49%, #34424b 50%, #152027 51%);
+      border: 16px solid #202c34;
+      box-shadow: 0 -9px 35px #ed312b88;
+    }
+    .fog {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 50% 70%, #74939922, transparent 60%);
+      animation: fog 9s ease-in-out infinite alternate;
+    }
+    .shade {
+      position: absolute; inset: 0;
+      background: linear-gradient(90deg, #04070af5, #04070a66 70%);
     }
     main {
-      width: min(540px, 92vw);
-      padding: 42px 28px;
-      text-align: center;
-      background: #06090ce8;
-      border: 1px solid #283139;
-      box-shadow: 0 0 110px #6e0c181a;
+      position: relative; min-height: 100vh;
+      padding: clamp(28px, 8vw, 110px);
+      display: flex; flex-direction: column; justify-content: center;
+      align-items: flex-start;
     }
-    .eyebrow {
-      color: #a58b65;
-      font: 12px monospace;
-      letter-spacing: .22em;
-    }
+    .eyebrow { color: #91a2ad; letter-spacing: .3em; font-size: 11px; }
     h1 {
-      font-size: clamp(42px, 10vw, 76px);
-      letter-spacing: .14em;
-      margin: 20px 0 0;
-      color: #e2e6e8;
+      font-size: clamp(48px, 10vw, 120px); line-height: 1;
+      letter-spacing: .12em; margin: 20px 0;
       animation: flicker 7s infinite;
     }
-    h2 {
-      font-size: 15px;
-      text-transform: uppercase;
-      letter-spacing: .22em;
-      color: #a1a9af;
+    h2 { font-size: 15px; letter-spacing: .25em; font-weight: 400; color: #e37b69; }
+    p { max-width: 440px; color: #9baebc; line-height: 1.8; }
+    nav { width: min(330px, 100%); margin-top: 28px; display: grid; gap: 10px; }
+    button, a {
+      border: 1px solid #44535c; background: #101820cc;
+      color: #edf4f8; padding: 15px 20px; text-align: left;
+      font: inherit; text-decoration: none; cursor: pointer;
     }
-    p { line-height: 1.65; color: #8d989f; }
-    nav { display: grid; gap: 12px; margin: 30px 0; }
-    button, .play {
-      display: block;
-      width: 100%;
-      padding: 14px;
-      border: 1px solid #52616a;
-      background: #111a20;
-      color: #e2e8ec;
-      font: inherit;
-      text-decoration: none;
-      cursor: pointer;
+    button:hover, a:hover { border-color: #e2856a; background: #34221f; }
+    a { border-left: 3px solid #f09772; }
+    dialog {
+      background: #101820; color: #e5eef5; border: 1px solid #4c606d;
+      padding: 28px; width: min(420px, 90vw);
     }
-    button:hover, .play:hover { background: #26333b; }
-    button:focus-visible, a:focus-visible {
-      outline: 2px solid #e6b76f;
-      outline-offset: 4px;
-    }
-    .play { border-color: #9a6d3a; color: #efc78e; }
-    [hidden] { display: none !important; }
-    #options {
-      padding: 16px;
-      border: 1px solid #34414a;
-      text-align: left;
-    }
-    label { display: grid; gap: 8px; margin-bottom: 16px; }
-    input { width: 100%; accent-color: #c49b63; }
-    small { color: #7f909c; }
-    details { margin-top: 28px; font-size: 13px; }
-    summary { cursor: pointer; }
-    .files {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 12px;
-      margin-top: 14px;
-    }
-    .files a { color: #bdcbd6; }
+    dialog::backdrop { background: #000b; }
+    label { display: block; margin: 22px 0; }
+    input { width: 100%; margin-top: 10px; accent-color: #e2856a; }
+    footer { position: absolute; bottom: 22px; font-size: 11px; color: #69808f; }
     @keyframes flicker {
-      0%, 92%, 96%, 100% { opacity: 1; }
-      93%, 95% { opacity: .32; }
+      0%, 93%, 97%, 100% { opacity: 1; }
+      94%, 96% { opacity: .45; }
     }
+    @keyframes fog { to { transform: translateX(8%); opacity: .4; } }
     @media (prefers-reduced-motion: reduce) {
-      h1 { animation: none; }
+      * { animation: none !important; }
     }
   </style>
 </head>
 <body>
-  <canvas id="stars" aria-hidden="true"></canvas>
-
+  <div class="scene" aria-hidden="true">
+    <div class="corridor"></div><div class="door"></div>
+    <div class="fog"></div><div class="shade"></div>
+  </div>
   <main>
-    <div class="eyebrow">ISV KEPLER-9 / SEÑAL DE SOCORRO</div>
+    <span class="eyebrow">ISV KEPLER-9 / SEÑAL DE SOCORRO</span>
     <h1>ECLIPSE</h1>
-    <h2>Capítulo 1: Protocolo Eclipse</h2>
+    <h2>CAPÍTULO 1 · PROTOCOLO ECLIPSE</h2>
     <p>
-      340 pasajeros en criosueño. Un contenedor abierto.
-      Ninguna respuesta desde el puente.
+      340 pasajeros. Una carga sin registrar. Ninguna respuesta.
+      Encuentra la bahía de escape antes de que la nave vuelva a quedarse en silencio.
     </p>
-
     <nav aria-label="Menú principal">
-      <a class="play" href="mapa1.html">Iniciar juego</a>
-      <button id="optionsButton" aria-expanded="false">Opciones</button>
-      <button id="exitButton">Salir</button>
+      <a href="mapa1.html">01 / Iniciar juego</a>
+      <button id="options">02 / Opciones</button>
+      <button id="exit">03 / Salir</button>
     </nav>
-
-    <section id="options" hidden aria-label="Opciones">
-      <label>
-        Volumen
-        <input id="volume" type="range" min="0" max="1" step=".05">
-      </label>
-      <label>
-        Sensibilidad del mouse
-        <input id="sensitivity" type="range"
-               min=".001" max=".006" step=".0005">
-      </label>
-      <small>Los ajustes se guardan en este navegador.</small>
-    </section>
-
-    <p id="notice" role="status">
-      Recomendado: computadora, teclado, mouse y auriculares.
-      Contiene efectos de luz intermitente.
-    </p>
-
-    <details>
-      <summary>Archivos del proyecto</summary>
-      <div class="files">
-        <a href="index.html" download>index.html</a>
-        <a href="mapa1.html" download>mapa1.html</a>
-        <a href="mapa1.css" download>mapa1.css</a>
-        <a href="personaje.js" download>personaje.js</a>
-        <a href="personaje.css" download>personaje.css</a>
-        <a href="sonidos.js" download>sonidos.js</a>
-      </div>
-    </details>
+    <p id="notice" role="status"></p>
+    <footer>EXPERIENCIA DE ESCRITORIO · TECLADO + MOUSE · AUDIO RECOMENDADO</footer>
   </main>
 
+  <dialog id="settings">
+    <h2>CONFIGURACIÓN</h2>
+    <label>Volumen
+      <input id="volume" type="range" min="0" max="1" step=".05">
+    </label>
+    <label>Sensibilidad del mouse
+      <input id="sensitivity" type="range" min=".5" max="2" step=".1">
+    </label>
+    <button id="save">Guardar y cerrar</button>
+  </dialog>
   <script>
-    const defaults = { volume: .55, sensitivity: .0025 };
-    let settings = { ...defaults };
-
+    let settings = { volume: .45, sensitivity: 1 };
     try {
-      const stored = JSON.parse(localStorage.getItem("eclipse.settings"));
-      if (stored && typeof stored === "object") {
-        settings = { ...defaults, ...stored };
-      }
+      settings = { ...settings, ...JSON.parse(localStorage.getItem("eclipse-settings") || "{}") };
     } catch {}
 
+    const dialog = document.querySelector("#settings");
     const volume = document.querySelector("#volume");
     const sensitivity = document.querySelector("#sensitivity");
     volume.value = settings.volume;
     sensitivity.value = settings.sensitivity;
 
-    function saveSettings() {
-      settings = {
-        volume: Number(volume.value),
-        sensitivity: Number(sensitivity.value)
-      };
+    document.querySelector("#options").onclick = () => dialog.showModal();
+    document.querySelector("#save").onclick = () => {
       try {
-        localStorage.setItem("eclipse.settings", JSON.stringify(settings));
+        localStorage.setItem("eclipse-settings", JSON.stringify({
+          volume: +volume.value,
+          sensitivity: +sensitivity.value
+        }));
       } catch {}
-    }
-
-    volume.addEventListener("input", saveSettings);
-    sensitivity.addEventListener("input", saveSettings);
-
-    document.querySelector("#optionsButton").onclick = event => {
-      const panel = document.querySelector("#options");
-      panel.hidden = !panel.hidden;
-      event.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
+      dialog.close();
     };
-
-    document.querySelector("#exitButton").onclick = () => {
+    document.querySelector("#exit").onclick = () => {
       document.querySelector("#notice").textContent =
-        "Sesión finalizada. Puedes cerrar esta pestaña para salir.";
+        "Puedes cerrar esta pestaña. El navegador no permite que el juego cierre una pestaña abierta manualmente.";
     };
-
-    const canvas = document.querySelector("#stars");
-    const ctx = canvas.getContext("2d");
-    const reducedMotion =
-      matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    let stars = [];
-    function resize() {
-      canvas.width = innerWidth;
-      canvas.height = innerHeight;
-      stars = Array.from({ length: 110 }, () => ({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        size: Math.random() * 1.5 + .3,
-        speed: Math.random() * .15 + .03
-      }));
-    }
-
-    function drawStars() {
-      ctx.fillStyle = "#030507";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      for (const star of stars) {
-        if (!reducedMotion) {
-          star.y = (star.y + star.speed) % canvas.height;
-        }
-        ctx.fillStyle = "#72818a";
-        ctx.fillRect(star.x, star.y, star.size, star.size);
-      }
-      if (!reducedMotion) requestAnimationFrame(drawStars);
-    }
-
-    addEventListener("resize", () => {
-      resize();
-      if (reducedMotion) drawStars();
-    });
-    resize();
-    drawStars();
   </script>
 </body>
 </html>
