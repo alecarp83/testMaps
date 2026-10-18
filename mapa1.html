@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Eclipse - Protocolo Eclipse</title>
+  <link rel="stylesheet" href="mapa1.css">
+  <link rel="stylesheet" href="personaje.css">
+  <script src="sonidos.js" defer></script>
+  <script src="personaje.js" defer></script>
+</head>
+<body>
+  <canvas id="world" aria-label="Vista en primera persona de la nave"></canvas>
+  <div id="vignette" aria-hidden="true"></div>
+  <div id="damage" aria-hidden="true"></div>
+  <div id="crosshair" aria-hidden="true">+</div>
+
+  <header id="mission">
+    <span>ISV KEPLER-9 / PROTOCOLO ECLIPSE</span>
+    <strong id="sector">Pasillo A</strong>
+    <p id="objective">Busca un fusible en la enfermería.</p>
+  </header>
+
+  <section id="hud" aria-label="Estado del personaje">
+    <svg class="silhouette" viewBox="0 0 40 90" aria-hidden="true">
+      <circle cx="20" cy="10" r="7"/>
+      <path d="M11 21H29L35 49L29 51L25 34V53L29 84H22L20 60L18 84H11L15 53V34L11 51L5 49Z"/>
+    </svg>
+    <div class="meters">
+      <label>INTEGRIDAD <span id="healthText">100</span></label>
+      <progress id="health" max="100" value="100"></progress>
+
+      <label>BATERÍA <span id="batteryText">100%</span></label>
+      <progress id="battery" max="100" value="100"></progress>
+
+      <label>RESISTENCIA <span id="stance">DE PIE</span></label>
+      <progress id="stamina" max="100" value="100"></progress>
+    </div>
+  </section>
+
+  <div id="hint"></div>
+  <div id="message" role="status" aria-live="polite"></div>
+
+  <footer id="controls">
+    WASD / Flechas: mover · Mouse / Q-R: mirar · Shift: correr
+    · C: agacharse · F: linterna · E: usar · Esc: pausa
+  </footer>
+
+  <div id="overlay">
+    <section class="panel" aria-labelledby="overlayTitle">
+      <div class="tag">REGISTRO DE EMERGENCIA 01</div>
+      <h1 id="overlayTitle">Protocolo Eclipse</h1>
+      <p id="overlayText">
+        La Kepler-9 viajaba hacia Meridian con 340 pasajeros en criosueño.
+        Un contenedor biológico se ha roto. La alarma te despierta:
+        eres el técnico de guardia y el puente no responde.
+        Encuentra un fusible en la enfermería, restaura la compuerta
+        y alcanza la bahía de escape. No tienes armas.
+      </p>
+      <button id="startButton">Despertar</button>
+      <a href="index.html">Volver al menú</a>
+      <small>
+        Haz clic en la escena para capturar el mouse.
+        También puedes mirar con Q y R.
+      </small>
+    </section>
+  </div>
+</body>
+</html>

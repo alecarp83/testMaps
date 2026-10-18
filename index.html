@@ -3,19 +3,225 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>map1</title>
-  <link rel="stylesheet" href="map1.css">
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+  <title>Eclipse - Capítulo 1</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #030507;
+      color: #cbd1d5;
+      font: 16px system-ui, sans-serif;
+      overflow-x: hidden;
     }
-  }
-  </script>
+    #stars {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+    }
+    main {
+      width: min(540px, 92vw);
+      padding: 42px 28px;
+      text-align: center;
+      background: #06090ce8;
+      border: 1px solid #283139;
+      box-shadow: 0 0 110px #6e0c181a;
+    }
+    .eyebrow {
+      color: #a58b65;
+      font: 12px monospace;
+      letter-spacing: .22em;
+    }
+    h1 {
+      font-size: clamp(42px, 10vw, 76px);
+      letter-spacing: .14em;
+      margin: 20px 0 0;
+      color: #e2e6e8;
+      animation: flicker 7s infinite;
+    }
+    h2 {
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: .22em;
+      color: #a1a9af;
+    }
+    p { line-height: 1.65; color: #8d989f; }
+    nav { display: grid; gap: 12px; margin: 30px 0; }
+    button, .play {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #52616a;
+      background: #111a20;
+      color: #e2e8ec;
+      font: inherit;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    button:hover, .play:hover { background: #26333b; }
+    button:focus-visible, a:focus-visible {
+      outline: 2px solid #e6b76f;
+      outline-offset: 4px;
+    }
+    .play { border-color: #9a6d3a; color: #efc78e; }
+    [hidden] { display: none !important; }
+    #options {
+      padding: 16px;
+      border: 1px solid #34414a;
+      text-align: left;
+    }
+    label { display: grid; gap: 8px; margin-bottom: 16px; }
+    input { width: 100%; accent-color: #c49b63; }
+    small { color: #7f909c; }
+    details { margin-top: 28px; font-size: 13px; }
+    summary { cursor: pointer; }
+    .files {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .files a { color: #bdcbd6; }
+    @keyframes flicker {
+      0%, 92%, 96%, 100% { opacity: 1; }
+      93%, 95% { opacity: .32; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      h1 { animation: none; }
+    }
+  </style>
 </head>
 <body>
-  <div id="hint">Cargando…</div>
-  <script type="module" src="map1.js"></script>
+  <canvas id="stars" aria-hidden="true"></canvas>
+
+  <main>
+    <div class="eyebrow">ISV KEPLER-9 / SEÑAL DE SOCORRO</div>
+    <h1>ECLIPSE</h1>
+    <h2>Capítulo 1: Protocolo Eclipse</h2>
+    <p>
+      340 pasajeros en criosueño. Un contenedor abierto.
+      Ninguna respuesta desde el puente.
+    </p>
+
+    <nav aria-label="Menú principal">
+      <a class="play" href="mapa1.html">Iniciar juego</a>
+      <button id="optionsButton" aria-expanded="false">Opciones</button>
+      <button id="exitButton">Salir</button>
+    </nav>
+
+    <section id="options" hidden aria-label="Opciones">
+      <label>
+        Volumen
+        <input id="volume" type="range" min="0" max="1" step=".05">
+      </label>
+      <label>
+        Sensibilidad del mouse
+        <input id="sensitivity" type="range"
+               min=".001" max=".006" step=".0005">
+      </label>
+      <small>Los ajustes se guardan en este navegador.</small>
+    </section>
+
+    <p id="notice" role="status">
+      Recomendado: computadora, teclado, mouse y auriculares.
+      Contiene efectos de luz intermitente.
+    </p>
+
+    <details>
+      <summary>Archivos del proyecto</summary>
+      <div class="files">
+        <a href="index.html" download>index.html</a>
+        <a href="mapa1.html" download>mapa1.html</a>
+        <a href="mapa1.css" download>mapa1.css</a>
+        <a href="personaje.js" download>personaje.js</a>
+        <a href="personaje.css" download>personaje.css</a>
+        <a href="sonidos.js" download>sonidos.js</a>
+      </div>
+    </details>
+  </main>
+
+  <script>
+    const defaults = { volume: .55, sensitivity: .0025 };
+    let settings = { ...defaults };
+
+    try {
+      const stored = JSON.parse(localStorage.getItem("eclipse.settings"));
+      if (stored && typeof stored === "object") {
+        settings = { ...defaults, ...stored };
+      }
+    } catch {}
+
+    const volume = document.querySelector("#volume");
+    const sensitivity = document.querySelector("#sensitivity");
+    volume.value = settings.volume;
+    sensitivity.value = settings.sensitivity;
+
+    function saveSettings() {
+      settings = {
+        volume: Number(volume.value),
+        sensitivity: Number(sensitivity.value)
+      };
+      try {
+        localStorage.setItem("eclipse.settings", JSON.stringify(settings));
+      } catch {}
+    }
+
+    volume.addEventListener("input", saveSettings);
+    sensitivity.addEventListener("input", saveSettings);
+
+    document.querySelector("#optionsButton").onclick = event => {
+      const panel = document.querySelector("#options");
+      panel.hidden = !panel.hidden;
+      event.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
+    };
+
+    document.querySelector("#exitButton").onclick = () => {
+      document.querySelector("#notice").textContent =
+        "Sesión finalizada. Puedes cerrar esta pestaña para salir.";
+    };
+
+    const canvas = document.querySelector("#stars");
+    const ctx = canvas.getContext("2d");
+    const reducedMotion =
+      matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    let stars = [];
+    function resize() {
+      canvas.width = innerWidth;
+      canvas.height = innerHeight;
+      stars = Array.from({ length: 110 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        size: Math.random() * 1.5 + .3,
+        speed: Math.random() * .15 + .03
+      }));
+    }
+
+    function drawStars() {
+      ctx.fillStyle = "#030507";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (const star of stars) {
+        if (!reducedMotion) {
+          star.y = (star.y + star.speed) % canvas.height;
+        }
+        ctx.fillStyle = "#72818a";
+        ctx.fillRect(star.x, star.y, star.size, star.size);
+      }
+      if (!reducedMotion) requestAnimationFrame(drawStars);
+    }
+
+    addEventListener("resize", () => {
+      resize();
+      if (reducedMotion) drawStars();
+    });
+    resize();
+    drawStars();
+  </script>
 </body>
 </html>

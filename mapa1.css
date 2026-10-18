@@ -1,0 +1,161 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  background: #000;
+  color: #d5dde1;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+#world {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  image-rendering: pixelated;
+}
+
+#mission {
+  position: fixed;
+  left: 28px;
+  top: 24px;
+  max-width: min(520px, 85vw);
+  pointer-events: none;
+  text-shadow: 0 2px 8px #000;
+}
+
+#mission > span {
+  display: block;
+  color: #8b949b;
+  font: 10px monospace;
+  letter-spacing: .14em;
+}
+
+#sector {
+  display: block;
+  margin-top: 9px;
+  font-size: 22px;
+  letter-spacing: .05em;
+}
+
+#objective {
+  color: #d3ac72;
+  font: 13px monospace;
+}
+
+#controls {
+  position: fixed;
+  bottom: 12px;
+  left: 20px;
+  right: 20px;
+  text-align: center;
+  color: #84919a;
+  font: 11px monospace;
+  pointer-events: none;
+}
+
+#hint, #message {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 2px 5px #000;
+  width: min(680px, 90vw);
+}
+
+#hint {
+  top: 65%;
+  color: #f0c994;
+  font: 14px monospace;
+}
+
+#message {
+  bottom: 150px;
+  color: #d8dfe4;
+  font-size: 15px;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #010305db;
+  backdrop-filter: blur(5px);
+}
+
+#overlay[hidden] { display: none; }
+
+.panel {
+  width: min(600px, 95vw);
+  max-height: 92vh;
+  overflow: auto;
+  padding: 36px;
+  border: 1px solid #4d4540;
+  background: linear-gradient(145deg, #171c20, #07090b);
+  box-shadow: 0 20px 90px #000;
+}
+
+.tag {
+  color: #b58b56;
+  font: 11px monospace;
+  letter-spacing: .14em;
+}
+
+.panel h1 {
+  font-size: clamp(26px, 6vw, 40px);
+  letter-spacing: .04em;
+}
+
+.panel p {
+  color: #adb7bf;
+  line-height: 1.8;
+  white-space: pre-line;
+}
+
+.panel button {
+  width: 100%;
+  padding: 14px;
+  background: #30251b;
+  border: 1px solid #b28751;
+  color: #f4d2a6;
+  font: inherit;
+  cursor: pointer;
+}
+
+.panel button:hover { background: #493522; }
+
+.panel a {
+  display: block;
+  margin: 20px 0;
+  text-align: center;
+  color: #c5d0d8;
+}
+
+.panel small {
+  display: block;
+  color: #75828c;
+  line-height: 1.6;
+}
+
+button:focus-visible, a:focus-visible {
+  outline: 2px solid #eac28a;
+  outline-offset: 4px;
+}
+
+@media (max-width: 600px) {
+  #mission { top: 15px; left: 15px; }
+  #controls { font-size: 9px; }
+  .panel { padding: 22px; }
+}
