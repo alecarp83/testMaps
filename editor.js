@@ -315,7 +315,7 @@ async function exportMap() {
     }))
   };
 
-  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${n}</title><link rel="stylesheet" href="${n}.css"><script type="importmap">{"imports":{"three":"[cdn.jsdelivr.net](https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js)"}}<\/script></head><body><div id="hint">Clic para jugar · WASD mover · Ratón mirar · Shift correr · Esc salir</div><script type="module" src="${n}.js"><\/script></body></html>`;
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${n}</title><link rel="stylesheet" href="${n}.css"><script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js"}}<\/script></head><body><div id="hint">Clic para jugar · WASD mover · Ratón mirar · Shift correr · Esc salir</div><script type="module" src="${n}.js"><\/script></body></html>`;
 
   const css = `html,body{margin:0;height:100%;overflow:hidden;background:#000}canvas{display:block}#hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);padding:14px 20px;background:rgba(0,0,0,.65);color:#fff;font:15px system-ui,sans-serif;border-radius:8px;pointer-events:none}#hint[hidden]{display:none}`;
 
