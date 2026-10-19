@@ -53,7 +53,13 @@
     return;
   }
 
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+  // --- Ajuste 7: pixel ratio adaptativo ---
+  const isCoarsePointer = matchMedia("(pointer: coarse)").matches;
+  const maxPixelRatio = isCoarsePointer ? 1 : 1.5;
+  const applyPixelRatio = () =>
+    renderer.setPixelRatio(Math.min(devicePixelRatio, maxPixelRatio));
+  applyPixelRatio();
+
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = T.PCFSoftShadowMap;
@@ -65,6 +71,7 @@
   const camera = new T.PerspectiveCamera(65, innerWidth / innerHeight, .08, 100);
   const raycaster = new T.Raycaster();
   const solids = [];
+  const solidMeshes = [];   // --- Ajuste 3: array paralelo para raycasts ---
   const interactables = [];
   const enemies = [];
   const emergencyLights = [];
@@ -88,14 +95,35 @@
     running: false, exhausted: false
   };
 
-  let yaw = 0;          // giro horizontal (rad)
-  let pitch = .06;      // inclinación vertical (rad)
-  let zoom = 3.5;       // distancia de la cámara al hombro
-  let selected = null;  // interactuable bajo el foco
+  let yaw = 0;
+  let pitch = .06;
+  let zoom = 3.5;
+  let selected = null;
 
-  // Atajo de material
-  const mat = (color, extra = {}) =>
-    new T.MeshStandardMaterial({ color, roughness: .85, ...extra });
+  // ---------------------------------------------------------------
+  // Ajuste 1 + 2: caches de geometría y material
+  // ---------------------------------------------------------------
+  const geoCache = new Map();
+  const boxGeo = (w, h, d) => {
+    const key = `${w}|${h}|${d}`;
+    let g = geoCache.get(key);
+    if (!g) {
+      g = new T.BoxGeometry(w, h, d);
+      geoCache.set(key, g);
+    }
+    return g;
+  };
+
+  const matCache = new Map();
+  const mat = (color, extra = {}) => {
+    const key = color + "|" + JSON.stringify(extra);
+    let m = matCache.get(key);
+    if (!m) {
+      m = new T.MeshStandardMaterial({ color, roughness: .85, ...extra });
+      matCache.set(key, m);
+    }
+    return m;
+  };
 
   const materials = {
     wall: mat(0x26333e),
@@ -113,11 +141,23 @@
     dark: mat(0x101820)
   };
 
+  // Materiales compartidos de humanoides (evita crear 5 materiales por cuerpo)
+  const humanoidMats = {
+    clothAlive: mat(0x9a7450),
+    clothInfected: mat(0x514c50),
+    skinAlive: mat(0xc4aa8b),
+    skinInfected: mat(0xa5b6a8),
+    legsAlive: mat(0x303f4a),
+    legsInfected: mat(0x303b3e),
+    bed: mat(0x75878a),
+    bedTop: mat(0x59646b)
+  };
+
   // ---------------------------------------------------------------
   // 5. Utilidades de construcción
   // ---------------------------------------------------------------
   function box(x, y, z, w, h, d, material, solid = false) {
-    const mesh = new T.Mesh(new T.BoxGeometry(w, h, d), material);
+    const mesh = new T.Mesh(boxGeo(w, h, d), material);
     mesh.position.set(x, y, z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -128,11 +168,11 @@
         minX: x - w / 2, maxX: x + w / 2,
         minZ: z - d / 2, maxZ: z + d / 2
       });
+      solidMeshes.push(mesh);   // --- Ajuste 3 ---
     }
     return mesh;
   }
 
-  // Cartel tipo canvas (planos con texto)
   function label(text, x, y, z, color = "#a5c6ce") {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
@@ -157,7 +197,7 @@
   scene.add(new T.HemisphereLight(0x627e9e, 0x111317, .34));
 
   // ---------------------------------------------------------------
-  // 6. Sectores de la nave (Pasillo A → Comedor → Enfermería → Bahía)
+  // 6. Sectores de la nave
   // ---------------------------------------------------------------
   const sectors = [
     { start: 0,  end: 20, name: "Pasillo A" },
@@ -183,7 +223,6 @@
 
     label(sector.name.toUpperCase(), 0, 4.1, sector.start + 3);
 
-    // Luz roja de emergencia intermitente
     const red = new T.PointLight(0xff3427, 15, 15, 2);
     red.position.set(-4, 4.2, middle);
     scene.add(red);
@@ -192,14 +231,12 @@
       emissive: 0xff261b, emissiveIntensity: 2
     }));
 
-    // Pantalla azul ambiental
     const blue = new T.PointLight(0x5799b5, 9, 11, 2);
     blue.position.set(5, 2.5, middle + 4);
     scene.add(blue);
     box(6.8, 2.5, middle + 4, .12, 1.1, 1.8, materials.screen);
   }
 
-  // Muros de los extremos
   box(0, 2.5, -.25, 14, 5, .5, materials.wall, true);
   box(0, 2.5, 80.25, 14, 5, .5, materials.wall, true);
 
@@ -230,12 +267,10 @@
   }
 
   function createDoor(z, requirement, denied) {
-    // Marco lateral y dintel
     box(-4.7, 2.5, z, 4.6, 5, .6, materials.wall, true);
     box(4.7, 2.5, z, 4.6, 5, .6, materials.wall, true);
     box(0, 4.65, z, 4.8, .7, .7, materials.trim);
 
-    // Hoja móvil
     const mesh = box(0, 2.05, z, 4.8, 4.1, .45, materials.trim, true);
     const collider = solids[solids.length - 1];
     const door = { mesh, collider, open: false };
@@ -245,15 +280,17 @@
       if (!requirement()) return toast(denied);
       door.open = true;
       item.active = false;
-      solids.splice(solids.indexOf(collider), 1);
-      // Deslizar la hoja hacia un lado (animación simple)
+      // --- Ajuste 3: quitar también de solidMeshes ---
+      const idx = solids.indexOf(collider);
+      if (idx >= 0) solids.splice(idx, 1);
+      const mIdx = solidMeshes.indexOf(collider.mesh);
+      if (mIdx >= 0) solidMeshes.splice(mIdx, 1);
       mesh.userData.slideFrom = mesh.position.x;
       mesh.userData.slideTo = -6.5;
       mesh.userData.slideT = 0;
       audio.effect("door");
     }, 3);
 
-    // Pequeña pantalla indicadora al lado
     box(2.65, 1.6, z - .4, .3, .5, .18, materials.screen);
   }
 
@@ -262,7 +299,7 @@
   createDoor(60, () => player.power, "Sin energía. Activa el panel de la Enfermería.");
 
   // ---------------------------------------------------------------
-  // 8. Decoración (cajas, literas, mesas, camillas, manchas)
+  // 8. Decoración
   // ---------------------------------------------------------------
   for (const z of [6, 13, 25, 34, 46, 56, 65, 73]) {
     const side = z % 2 ? -1 : 1;
@@ -270,13 +307,11 @@
     box(side * 5.4, 1.33, z, 1.8, .08, 1.6, materials.trim);
   }
 
-  // Literas del sector de criosueño (Pasillo A)
   for (const z of [7, 11, 15]) {
     box(-5.6, .75, z, 2, .3, 2.6, materials.trim, true);
-    box(-5.6, 1, z, 1.8, .22, 2.3, mat(0x59646b));
+    box(-5.6, 1, z, 1.8, .22, 2.3, humanoidMats.bedTop);
   }
 
-  // Mesas del comedor
   for (const x of [-3.7, 3.7]) {
     for (const z of [27, 33]) {
       box(x, .65, z, 2.2, 1.3, 2.4, materials.dark, true);
@@ -285,13 +320,11 @@
     }
   }
 
-  // Camillas de enfermería
   for (const z of [45, 51, 56]) {
     box(-4.6, .65, z, 2.2, 1.3, 2.7, materials.trim, true);
-    box(-4.6, 1.4, z, 2, .25, 2.5, mat(0x75878a));
+    box(-4.6, 1.4, z, 2, .25, 2.5, humanoidMats.bed);
   }
 
-  // Manchas y cristales rotos (sin colisión para no atascar)
   for (let i = 0; i < 28; i++) {
     const z = 8 + i * 2.4;
     const x = Math.sin(i * 8.3) * 5;
@@ -304,19 +337,19 @@
   }
 
   // ---------------------------------------------------------------
-  // 9. Modelo humanoide modular (jugador e infectados)
+  // 9. Modelo humanoide modular (materiales compartidos)
   // ---------------------------------------------------------------
   function humanoid(infected = false) {
     const root = new T.Group();
     const body = new T.Group();
     root.add(body);
 
-    const cloth = mat(infected ? 0x514c50 : 0x9a7450);
-    const skin = mat(infected ? 0xa5b6a8 : 0xc4aa8b);
-    const legsMaterial = mat(infected ? 0x303b3e : 0x303f4a);
+    const cloth = infected ? humanoidMats.clothInfected : humanoidMats.clothAlive;
+    const skin  = infected ? humanoidMats.skinInfected  : humanoidMats.skinAlive;
+    const legsMaterial = infected ? humanoidMats.legsInfected : humanoidMats.legsAlive;
 
     function part(w, h, d, material, x, y, z, parent = body) {
-      const mesh = new T.Mesh(new T.BoxGeometry(w, h, d), material);
+      const mesh = new T.Mesh(boxGeo(w, h, d), material);
       mesh.position.set(x, y, z);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -324,16 +357,14 @@
       return mesh;
     }
 
-    // Torso, cabeza y visor
     part(.72, .8, .4, cloth, 0, 1.13, 0);
     part(.48, .48, .45, skin, 0, 1.82, 0);
     part(.36, .13, .04, materials.dark, 0, 1.87, .245);
     if (!infected) {
-      part(.48, .57, .24, legsMaterial, 0, 1.2, -.3);   // mochila
-      part(.16, .09, .035, materials.screen, .2, 1.3, .225); // insignia
+      part(.48, .57, .24, legsMaterial, 0, 1.2, -.3);
+      part(.16, .09, .035, materials.screen, .2, 1.3, .225);
     }
 
-    // Brazos y piernas con pivote para animar
     const limbs = [];
     for (const side of [-1, 1]) {
       const arm = new T.Group();
@@ -357,7 +388,6 @@
   const avatar = humanoid();
   avatar.root.position.copy(player.pos);
 
-  // Cuerpos caídos para ambientar
   for (const [x, z] of [[3, 12], [-5.5, 36], [4.7, 53]]) {
     const corpse = humanoid(true);
     corpse.root.position.set(x, .25, z);
@@ -384,21 +414,18 @@
     });
   }
 
-  // Tarjeta de acceso (objetivo 1)
   collectible(3.2, 10, 0x62c3d3, "Recoger tarjeta de acceso", () => {
     player.card = true;
     advance(1);
     toast("Tarjeta del oficial de carga recuperada. El Comedor está al norte.");
   });
 
-  // Fusible de emergencia (objetivo 2)
   collectible(-5.6, 30, 0xe5b466, "Recoger fusible", () => {
     player.fuse = true;
     advance(2);
     toast("Fusible recuperado. Busca el panel azul en la Enfermería.");
   });
 
-  // Celdas de batería repartidas por la nave
   for (const [x, z] of [[4, 17], [5.5, 37], [4.5, 55], [-4, 71]]) {
     collectible(x, z, 0xd7ad59, "Recoger celda de batería", () => {
       player.cells++;
@@ -406,7 +433,6 @@
     });
   }
 
-  // Botiquines
   for (const [x, z] of [[-3, 18], [4.7, 46], [-4, 67]]) {
     collectible(x, z, 0x77c798, "Usar botiquín", () => {
       if (player.hp >= 100) {
@@ -436,7 +462,6 @@
     2.5
   );
 
-  // Compuerta final
   box(0, 2, 79.7, 4.5, 4, .25, materials.trim);
   const exitPanel = box(3, 1.4, 77, .6, 1.2, .6, materials.screen, true);
   addInteraction(
@@ -475,11 +500,12 @@
     raycaster.set(from, direction.normalize());
     raycaster.near = 0;
     raycaster.far = distance;
-    return raycaster.intersectObjects(solids.map(s => s.mesh), false).length === 0;
+    // --- Ajuste 3: usar solidMeshes ---
+    return raycaster.intersectObjects(solidMeshes, false).length === 0;
   }
 
   // ---------------------------------------------------------------
-  // 13. Linterna (foco real + cono translúcido)
+  // 13. Linterna
   // ---------------------------------------------------------------
   const flashlight = new T.SpotLight(0xffdfac, 65, 23, .37, .65, 1.2);
   flashlight.castShadow = true;
@@ -510,9 +536,9 @@
     });
   }
 
-  spawnEnemy(1.5, 29, 23, 37);   // Comedor
-  spawnEnemy(-1.5, 49, 43, 57);  // Enfermería
-  spawnEnemy(1.7, 70, 63, 76);   // Bahía
+  spawnEnemy(1.5, 29, 23, 37);
+  spawnEnemy(-1.5, 49, 43, 57);
+  spawnEnemy(1.7, 70, 63, 76);
 
   // ---------------------------------------------------------------
   // 15. Animación del modelo modular
@@ -547,7 +573,6 @@
     player.moving = length > 0;
     if (length) { forward /= length; side /= length; }
 
-    // Gestión de resistencia
     if (player.stamina <= 1) player.exhausted = true;
     if (player.stamina > 30) player.exhausted = false;
     player.running = player.moving && !player.crouched &&
@@ -558,12 +583,10 @@
       player.stamina + (player.running ? -26 : 16) * dt, 0, 100
     );
 
-    // La cámara mira hacia +Z inicialmente; su derecha es -X.
     const dx = (Math.sin(yaw) * forward - Math.cos(yaw) * side) * speed * dt;
     const dz = (Math.cos(yaw) * forward + Math.sin(yaw) * side) * speed * dt;
     move(player.pos, dx, dz);
 
-    // Avatar sigue al jugador con giro suavizado
     avatar.root.position.copy(player.pos);
     const angularDifference = Math.atan2(
       Math.sin(yaw - avatar.root.rotation.y),
@@ -576,7 +599,6 @@
       state.time * (player.running ? 13 : player.crouched ? 5 : 8)
     );
 
-    // Consumo de batería por la linterna
     if (player.flashlight) {
       player.battery = Math.max(0, player.battery - .52 * dt);
       if (player.battery === 0) {
@@ -615,7 +637,7 @@
   }
 
   // ---------------------------------------------------------------
-  // 18. Cámara en tercera persona (con colisión)
+  // 18. Cámara en tercera persona
   // ---------------------------------------------------------------
   function updateCamera(dt) {
     const forward = new T.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
@@ -632,13 +654,13 @@
 
     camera.position.lerp(desired, 1 - Math.exp(-10 * dt));
 
-    // Raycast DESPUÉS del suavizado: evita que la cámara entre en paredes
     const direction = camera.position.clone().sub(pivot);
     const distance = direction.length();
     raycaster.set(pivot, direction.normalize());
     raycaster.near = 0;
     raycaster.far = distance + .18;
-    const hits = raycaster.intersectObjects(solids.map(s => s.mesh), false);
+    // --- Ajuste 3: usar solidMeshes ---
+    const hits = raycaster.intersectObjects(solidMeshes, false);
     if (hits.length) {
       camera.position.copy(pivot).addScaledVector(
         direction, Math.max(.12, hits[0].distance - .2)
@@ -652,7 +674,6 @@
         .add(new T.Vector3(0, -Math.sin(pitch) * 7, 0))
     );
 
-    // Ocultar el avatar si la cámara se pega al jugador
     avatar.root.visible = camera.position.distanceTo(pivot) > .65;
   }
 
@@ -671,7 +692,6 @@
       const targetEye = player.pos.clone().add(new T.Vector3(0, 1.2, 0));
       const clear = distance < 18 && visibleBetween(eye, targetEye);
 
-      // Rango de detección por ruido / luz
       const noiseRange = player.running ? 11
         : player.moving ? (player.crouched ? 1.4 : 4.5) : 0;
       const sightRange = player.flashlight ? 14
@@ -684,7 +704,6 @@
         enemy.memory = Math.max(0, enemy.memory - dt);
       }
 
-      // Patrulla si no hay memoria de jugador
       if (enemy.memory <= 0) {
         enemy.target.set(
           1.2 * Math.sin(enemy.phase),
@@ -702,7 +721,6 @@
         const old = enemy.pos.clone();
         move(enemy.pos, direction.x * speed * dt, direction.z * speed * dt, .4);
 
-        // Desvío si se queda atascado en un obstáculo
         if (old.distanceTo(enemy.pos) < speed * dt * .2) {
           move(enemy.pos,
             -direction.z * speed * dt,
@@ -714,7 +732,6 @@
       animateModel(enemy, moving, false, false, state.time * 7 + enemy.phase);
       enemy.body.rotation.z = Math.sin(state.time * 4 + enemy.phase) * .075;
 
-      // Ataque
       if (distance < 1.2 && clear && enemy.cooldown <= 0) {
         enemy.cooldown = 1.2;
         player.hp = Math.max(0, player.hp - 24);
@@ -744,13 +761,13 @@
       const distance = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
       if (distance > item.radius || distance >= nearest) continue;
 
-      // No permitir interactuar a través de una pared
       const target = p.clone();
       const direction = target.clone().sub(eye);
       raycaster.set(eye, direction.clone().normalize());
       raycaster.near = 0;
       raycaster.far = direction.length();
-      const hits = raycaster.intersectObjects(solids.map(s => s.mesh), false);
+      // --- Ajuste 3: usar solidMeshes ---
+      const hits = raycaster.intersectObjects(solidMeshes, false);
       if (hits.length && hits[0].object !== item.mesh) continue;
 
       selected = item;
@@ -820,12 +837,10 @@
     if (state.dead || state.finished || state.ending) return;
     state.paused = false;
     $("overlay").hidden = true;
-    // Consumir el tiempo acumulado mientras estaba pausado
     clock.getDelta();
     audio.start();
     if (renderer.domElement.requestPointerLock) {
       const p = renderer.domElement.requestPointerLock();
-      // Algunos navegadores devuelven promesa; ignora errores
       if (p && typeof p.catch === "function") p.catch(() => {});
     }
   }
@@ -858,10 +873,9 @@
   }
 
   // ---------------------------------------------------------------
-  // 23. Entradas (teclado, mouse, pointer lock)
+  // 23. Entradas
   // ---------------------------------------------------------------
   addEventListener("keydown", e => {
-    // Prevenir scroll con flechas / espacio
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"]
         .includes(e.code)) e.preventDefault();
 
@@ -896,10 +910,11 @@
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
+    // --- Ajuste 7: recalcular pixel ratio también en resize ---
+    applyPixelRatio();
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // Reclamar pointer lock al hacer click sobre el canvas
   renderer.domElement.addEventListener("click", () => {
     if (isPlayable() && document.pointerLockElement !== renderer.domElement) {
       const p = renderer.domElement.requestPointerLock?.();
@@ -907,7 +922,6 @@
     }
   });
 
-  // Si el usuario sale del pointer lock, pausar
   document.addEventListener("pointerlockchange", () => {
     if (document.pointerLockElement !== renderer.domElement) {
       if (isPlayable()) pause();
@@ -955,7 +969,6 @@
 
     const dt = Math.min(.05, clock.getDelta());
 
-    // En pausa seguimos renderizando la escena detrás del overlay
     if (state.paused) {
       renderer.render(scene, camera);
       return;
@@ -963,16 +976,13 @@
 
     state.time += dt;
 
-    // --- Cinemática de fin de capítulo ---
     if (state.ending) {
       state.endTime += dt;
       const alpha = Math.min(1, state.endTime * .55);
-      // Fundido a blanco cálido + negro en el overlay de daño
       $("damage").style.background =
         `radial-gradient(ellipse, rgba(250,235,205,${alpha * .9}), rgba(0,0,0,${alpha}))`;
       $("damage").style.opacity = 1;
 
-      // La cámara se aleja lentamente hacia arriba
       zoom = Math.min(6, zoom + dt * .4);
       updateLight();
       updateCamera(dt);
@@ -993,14 +1003,12 @@
       return;
     }
 
-    // --- Actualizaciones normales ---
     updatePlayer(dt);
     updateLight();
     updateCamera(dt);
 
     const proximity = updateEnemies(dt);
 
-    // Si morimos durante la actualización de enemigos, cortamos aquí
     if (state.dead) {
       renderer.render(scene, camera);
       return;
@@ -1009,12 +1017,10 @@
     updateInteraction();
     updateHUD(dt, proximity);
 
-    // Parpadeo de luces de emergencia
     for (const light of emergencyLights) {
       light.intensity = 15 + Math.sin(state.time * 7 + light.position.z) * 6;
     }
 
-    // Animar puertas que se abren
     for (const door of doors) {
       if (!door.open || door.mesh.userData.slideT === undefined) continue;
       door.mesh.userData.slideT = Math.min(
@@ -1026,7 +1032,6 @@
         (door.mesh.userData.slideTo - door.mesh.userData.slideFrom) * ease;
     }
 
-    // Audio dinámico (ambiente, pasos, latidos, gruñidos)
     audio.update(dt, player, proximity);
 
     renderer.render(scene, camera);
@@ -1035,7 +1040,6 @@
   // ---------------------------------------------------------------
   // 27. Arranque
   // ---------------------------------------------------------------
-  // Estado inicial: pausa con overlay (ya viene visible en HTML).
   $("overlayTitle").textContent = "Protocolo Eclipse";
   $("overlayText").textContent =
     "Despiertas en el Pasillo A. Recupera una tarjeta, restablece " +
