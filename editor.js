@@ -27,6 +27,46 @@ const GROUPS = {
   scene: "Escena"
 };
 
+/**
+ * Articulaciones editables. Los ángulos se expresan en grados y son OFFSETS
+ * sobre la postura base (stance). Convención común para todo el cuerpo:
+ *   X = adelante/atrás (flexión), Y = giro sobre el eje del hueso, Z = lateral.
+ * `sx` corrige el signo de X para que "positivo" sea flexionar hacia delante
+ * (codo, muñeca, hombro) o hacia atrás (rodilla). Y y Z se espejan según el
+ * lado: los mismos valores en izquierda y derecha dan una pose simétrica.
+ */
+const JOINT_CONFIG = {
+  waist:    { sx:  1, order: "XZY" },
+  neck:     { sx:  1, order: "XZY" },
+  shoulder: { sx: -1, order: "XZY" },
+  elbow:    { sx: -1, order: "XZY" },
+  wrist:    { sx: -1, order: "XZY" },
+  knee:     { sx:  1, order: "XZY" }
+};
+
+/** Postura base en las mismas unidades que los sliders (grados). */
+const STANCES = {
+  idle:    { shoulder: { z: 8 },            elbow: { x: 12 }, knee: { x: 2 } },
+  relaxed: { shoulder: { z: 12 },           elbow: { x: 10 }, knee: { x: 2.5 } },
+  action:  { shoulder: { x: 35, z: 20 },    elbow: { x: 80 }, knee: { x: 10 }, waist: { x: 6 } },
+  tpose:   { shoulder: { z: 90 } }
+};
+
+/** Parámetros de pose que corresponden a articulaciones (para reset/espejo). */
+const JOINT_KEY = /^(waist|neck|shoulder|elbow|wrist|knee)([LR])?([XYZ])$/;
+
+const _euler = new THREE.Euler();
+const _qBase = new THREE.Quaternion();
+const _qOffset = new THREE.Quaternion();
+
+/** side: +1 izquierda (x > 0), -1 derecha (x < 0), 0 central. */
+function jointQuaternion(out, joint, side, x, y, z) {
+  const cfg = JOINT_CONFIG[joint];
+  const mirror = side || 1;
+  _euler.set(rad(x) * cfg.sx, rad(y) * mirror, rad(z) * mirror, cfg.order);
+  return out.setFromEuler(_euler);
+}
+
 let noticeTimer;
 
 /** Muestra información sin interpretar HTML recibido del usuario. */
@@ -214,21 +254,38 @@ class SchemaLoader {
       if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
         throw new Error(`Falta el grupo ${group}.`);
       }
-      for (const key of Object.keys(supplied)) {
+      // Parámetros de pose de la v1.0 que fueron reemplazados por articulaciones.
+      let source = supplied;
+      if (group === "pose" && migration) {
+        source = { ...supplied };
+        if (Object.hasOwn(source, "headTilt")) {
+          const tilt = source.headTilt;
+          const v = tilt && typeof tilt === "object" && Object.hasOwn(tilt, "value") ? tilt.value : tilt;
+          if (!Object.hasOwn(source, "neckZ") && typeof v === "number") source.neckZ = v;
+        }
+        for (const legacy of ["headTilt", "armAngleL", "armAngleR"]) {
+          if (Object.hasOwn(source, legacy)) {
+            delete source[legacy];
+            warnings.push(`pose.${legacy} ya no existe (reemplazado por articulaciones)`);
+          }
+        }
+      }
+      for (const key of Object.keys(source)) {
         if (!Object.hasOwn(schema[group], key)) {
           throw new Error(`Parámetro desconocido: ${group}.${key}.`);
         }
       }
+      let added = 0;
       for (const [key, definition] of Object.entries(schema[group])) {
-        if (!Object.hasOwn(supplied, key)) {
+        if (!Object.hasOwn(source, key)) {
           if (migration) {
-            warnings.push(`Se añadió ${definition.id}`);
+            added++;
             continue;
           }
           throw new Error(`Falta ${definition.id}.`);
         }
         // Acepta valores simples y el formato { value: ... } del contrato.
-        const raw = supplied[key];
+        const raw = source[key];
         const value = raw && typeof raw === "object" && Object.hasOwn(raw, "value")
           ? raw.value
           : raw;
@@ -238,6 +295,7 @@ class SchemaLoader {
         }
         output[group][key] = valid;
       }
+      if (added) warnings.push(`Se añadieron ${added} parámetros nuevos de ${group}`);
     }
     return { state: output, warnings };
   }
@@ -633,7 +691,13 @@ class CharacterBuilder {
     scene.add(this.root);
     this.materials = new MaterialCache(normalMap);
     this.body = null;
+    this.waistPivot = null;
+    this.upper = null;
+    this.neckPivot = null;
     this.headPivot = null;
+    this.arms = [];
+    this.legs = [];
+    this.jointMarkers = [];
     this.headParts = new Map();
     this.state = null;
     this.dimensions = null;
@@ -705,12 +769,13 @@ class CharacterBuilder {
 
   /**
    * Dirty flags por dependencia. Ojos, pelo y accesorios no reconstruyen cuerpo.
-   * Pose/cuerpo/ropa reconstruyen el conjunto corporal porque comparten huesos.
+   * Cuerpo/ropa/materiales reconstruyen el conjunto corporal porque comparten huesos.
+   * La pose solo rota pivotes y huesos existentes: no reconstruye nada.
    */
   update(state, groups) {
     this.state = state;
     const dirty = new Set(groups);
-    const full = !this.body || ["body", "clothing", "materials", "pose"]
+    const full = !this.body || ["body", "clothing", "materials"]
       .some((group) => dirty.has(group));
     this.dimensions = this.measure(state);
 
@@ -721,7 +786,9 @@ class CharacterBuilder {
       for (const part of ["face", "eyes", "hair", "accessories"]) {
         this.rebuildHeadPart(part, state);
       }
+      this.applyPose(state);
     } else {
+      if (dirty.has("pose")) this.applyPose(state);
       if (dirty.has("face")) {
         // El tono de piel también afecta el cuerpo.
         this.body.traverse((object) => {
@@ -743,6 +810,61 @@ class CharacterBuilder {
     this.root.scale.setScalar(this.dimensions.scale);
     this.root.updateMatrixWorld(true);
     this.materials.sweep(this.root);
+  }
+
+  /**
+   * Aplica la pose a pivotes y huesos ya construidos.
+   * Rotación final = postura base × offset del usuario (offset en el eje local
+   * del hueso), así X/Y/Z conservan su significado en cualquier postura base.
+   */
+  applyPose(state = this.state) {
+    if (!state || !this.body) return;
+    const pose = state.pose;
+    const base = STANCES[pose.stance] || STANCES.relaxed;
+
+    const apply = (bone, joint, side) => {
+      const suffix = side === 0 ? "" : side > 0 ? "L" : "R";
+      const b = base[joint] || {};
+      jointQuaternion(_qBase, joint, side, b.x || 0, b.y || 0, b.z || 0);
+      jointQuaternion(
+        _qOffset, joint, side,
+        pose[`${joint}${suffix}X`], pose[`${joint}${suffix}Y`], pose[`${joint}${suffix}Z`]
+      );
+      bone.quaternion.copy(_qBase).multiply(_qOffset);
+    };
+
+    apply(this.waistPivot, "waist", 0);
+    apply(this.neckPivot, "neck", 0);
+    for (const arm of this.arms) {
+      apply(arm.shoulder, "shoulder", arm.side);
+      apply(arm.elbow, "elbow", arm.side);
+      apply(arm.wrist, "wrist", arm.side);
+    }
+    for (const leg of this.legs) apply(leg.elbow, "knee", leg.side);
+
+    for (const marker of this.jointMarkers) marker.visible = pose.showJoints;
+    this.root.updateMatrixWorld(true);
+  }
+
+  /** Esferas visibles en cada articulación (ayuda de edición, no se exportan). */
+  addJointMarkers() {
+    const geometry = new THREE.SphereGeometry(0.014, 12, 10);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffb020, depthTest: false, transparent: true, opacity: 0.92
+    });
+    this.jointMarkers = [];
+    const pivots = [this.waistPivot, this.neckPivot];
+    for (const arm of this.arms) pivots.push(arm.shoulder, arm.elbow, arm.wrist);
+    for (const leg of this.legs) pivots.push(leg.elbow);
+    for (const pivot of pivots) {
+      const marker = new THREE.Mesh(geometry, material);
+      marker.name = "jointMarker";
+      marker.renderOrder = 999;
+      marker.visible = false;
+      marker.userData.ownedMaterial = true;
+      pivot.add(marker);
+      this.jointMarkers.push(marker);
+    }
   }
 
   rebuildHeadPart(part, state) {
@@ -813,6 +935,18 @@ class CharacterBuilder {
     this.body = new THREE.Group();
     this.root.add(this.body);
 
+    // Cintura: pivote sobre la pelvis. Torso, cuello, cabeza y brazos cuelgan de
+    // `upper`, que se desplaza en sentido contrario para seguir usando
+    // coordenadas absolutas. Las piernas quedan fijas en `body`.
+    const waistY = d.hip + 0.02;
+    this.waistPivot = new THREE.Group();
+    this.waistPivot.name = "waist";
+    this.waistPivot.position.set(0, waistY, 0);
+    this.body.add(this.waistPivot);
+    this.upper = new THREE.Group();
+    this.upper.position.set(0, -waistY, 0);
+    this.waistPivot.add(this.upper);
+
     const torsoProfile = [
       [0, d.hip - 0.07],
       [d.hipWidth, d.hip - 0.04],
@@ -823,20 +957,25 @@ class CharacterBuilder {
       [0.045, d.shoulder + 0.025],
       [0, d.shoulder + 0.025]
     ];
-    const torso = this.lathe(this.body, torsoProfile, skin, 0.66);
+    const torso = this.lathe(this.upper, torsoProfile, skin, 0.66);
     torso.userData.skin = true;
 
+    // Cuello: pivote en la base; la cabeza cuelga de su extremo superior.
+    this.neckPivot = new THREE.Group();
+    this.neckPivot.name = "neck";
+    this.neckPivot.position.set(0, d.shoulder, 0);
+    this.upper.add(this.neckPivot);
     const neck = this.mesh(
-      this.body,
+      this.neckPivot,
       new THREE.CylinderGeometry(0.045, 0.052, d.neck + 0.05, 20),
       skin,
-      [0, d.shoulder + d.neck / 2, 0]
+      [0, d.neck / 2, 0]
     );
     neck.userData.skin = true;
 
     if (clothes.topType !== "none") {
       const top = this.lathe(
-        this.body,
+        this.upper,
         torsoProfile.map(([r, y]) => [r ? r + 0.008 : 0, y]),
         cloth(clothes.topColor),
         0.7
@@ -853,7 +992,7 @@ class CharacterBuilder {
         for (let i = 0; i < 5; i++) {
           const y = d.hip + 0.08 + (d.torso * 0.8 * i) / 4;
           this.mesh(
-            this.body,
+            this.upper,
             new THREE.SphereGeometry(0.006, 8, 6),
             seam,
             [0, y, d.hipWidth * 0.55 + 0.008]
@@ -862,7 +1001,7 @@ class CharacterBuilder {
       } else if (clothes.topType === "hoodie") {
         // Capucha volumétrica detrás del cuello.
         const hood = this.ellipsoid(
-          this.body,
+          this.upper,
           cloth(clothes.topColor),
           [0, d.shoulder + d.neck * 0.35, -0.09],
           [0.13, 0.1, 0.11],
@@ -878,7 +1017,7 @@ class CharacterBuilder {
         );
         for (const side of [-1, 1]) {
           const lapelMesh = this.mesh(
-            this.body,
+            this.upper,
             new THREE.BoxGeometry(0.018, d.torso * 0.55, 0.006),
             lapel,
             [side * 0.035, d.hip + d.torso * 0.55, d.hipWidth * 0.52]
@@ -886,7 +1025,7 @@ class CharacterBuilder {
           lapelMesh.rotation.z = side * 0.12;
         }
         this.mesh(
-          this.body,
+          this.upper,
           new THREE.BoxGeometry(0.008, d.torso * 0.75, 0.004),
           seam,
           [0, d.hip + d.torso * 0.45, d.hipWidth * 0.56]
@@ -901,8 +1040,7 @@ class CharacterBuilder {
       const leg = this.skinnedLimb(this.body, d.leg, d.limbRadius, skin);
       leg.mesh.position.set(hipX, d.hip, 0);
       leg.shoulder.rotation.z = side * 0.03;
-      // Rodilla levemente flexionada por defecto.
-      leg.elbow.rotation.x = 0.04;
+      // La flexión de rodilla la aplica applyPose().
       this.legs.push({ ...leg, side });
 
       if (clothes.bottomType !== "none") {
@@ -961,10 +1099,10 @@ class CharacterBuilder {
     this.arms = [];
     for (const side of [-1, 1]) {
       const shoulderX = side * d.shoulderWidth * 0.92;
-      const arm = this.skinnedLimb(this.body, d.arm, d.limbRadius * 0.85, skin);
+      const arm = this.skinnedLimb(this.upper, d.arm, d.limbRadius * 0.85, skin);
       arm.mesh.position.set(shoulderX, d.shoulder - 0.02, 0);
-      arm.shoulder.rotation.z = side * (Math.PI / 2 - 0.12);
-      arm.elbow.rotation.x = 0.15;
+      // Hombro, codo y muñeca los orienta applyPose().
+      // side: +1 = izquierdo del personaje (x > 0), -1 = derecho.
       this.arms.push({ ...arm, side });
 
       if (clothes.topType !== "none") {
@@ -995,9 +1133,8 @@ class CharacterBuilder {
 
     // Cabeza: pivote independiente para inclinación.
     this.headPivot = new THREE.Group();
-    this.headPivot.position.set(0, d.headY - d.head * 0.78, 0);
-    this.headPivot.rotation.z = rad(state.pose.headTilt);
-    this.body.add(this.headPivot);
+    this.headPivot.position.set(0, d.neck, 0);
+    this.neckPivot.add(this.headPivot);
 
     const headScale = [
       d.head * 0.78,
@@ -1024,6 +1161,8 @@ class CharacterBuilder {
       24
     );
     headMesh.userData.skin = true;
+
+    this.addJointMarkers();
   }
 
   /* ---------- Rostro ---------- */
@@ -1840,10 +1979,72 @@ class UIController {
     $("#group-title").textContent = GROUPS[groupKey];
     $("#group-count").textContent = `${Object.keys(group).length} parámetros`;
 
+    if (groupKey === "pose") form.append(this.createPoseTools());
+
+    let section = null;
     for (const definition of Object.values(group)) {
+      if (definition.section && definition.section !== section) {
+        section = definition.section;
+        const heading = document.createElement("h2");
+        heading.className = "control-section";
+        heading.textContent = section;
+        form.append(heading);
+      }
       form.append(this.createControl(definition, state));
     }
     this.renderedGroups.add(groupKey);
+  }
+
+  /** Acciones rápidas del panel de pose. */
+  createPoseTools() {
+    const bar = document.createElement("div");
+    bar.className = "pose-tools";
+    const button = (text, title, action) => {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.textContent = text;
+      el.title = title;
+      el.addEventListener("click", action);
+      return el;
+    };
+    bar.append(
+      button("Restablecer pose", "Pone todas las articulaciones en 0°", () => this.resetPose()),
+      button("Copiar I → D", "Copia la pose del lado izquierdo al derecho (simétrica)",
+        () => this.copyPoseSide("L", "R")),
+      button("Copiar D → I", "Copia la pose del lado derecho al izquierdo (simétrica)",
+        () => this.copyPoseSide("R", "L"))
+    );
+    return bar;
+  }
+
+  /** Aplica varios cambios de pose como un único paso de deshacer. */
+  setPoseValues(values) {
+    this.states.begin();
+    for (const [key, value] of Object.entries(values)) {
+      this.states.set("pose", key, value);
+      this.updateControlValue(this.schema.pose[key]);
+    }
+    this.states.commit();
+  }
+
+  resetPose() {
+    const values = {};
+    for (const [key, definition] of Object.entries(this.schema.pose)) {
+      if (JOINT_KEY.test(key)) values[key] = definition.default;
+    }
+    this.setPoseValues(values);
+  }
+
+  /** Y y Z se espejan internamente, así que copiar valores da una pose simétrica. */
+  copyPoseSide(from, to) {
+    const values = {};
+    for (const key of Object.keys(this.schema.pose)) {
+      const match = key.match(JOINT_KEY);
+      if (match && match[2] === from) {
+        values[`${match[1]}${to}${match[3]}`] = this.states.state.pose[key];
+      }
+    }
+    this.setPoseValues(values);
   }
 
   createControl(definition, state) {

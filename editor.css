@@ -290,6 +290,19 @@ input[type="checkbox"] {
 .control-inputs input[type="number"] { width: 78px; }
 .control-inputs input[type="text"] { width: 110px; }
 .control-inputs input[type="color"] { width: 48px; height: 36px; padding: 3px; }
+.control-section {
+  margin: 22px 0 0;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--accent);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.control-section:first-child { margin-top: 8px; }
+.pose-tools { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0 4px; }
+.pose-tools button { flex: 1 1 auto; }
 .control-error { display: block; min-height: 0; margin-top: 4px; color: var(--danger); font-size: 11px; }
 
 input[type="range"] {
