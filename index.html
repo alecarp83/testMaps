@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#11151d">
+  <title>Procedural Character Editor</title>
+  <link rel="stylesheet" href="./editor.css">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "[unpkg.com](https://unpkg.com/three@0.160.0/build/three.module.js)",
+      "three/addons/": "[unpkg.com](https://unpkg.com/three@0.160.0/examples/jsm/)",
+      "lz-string": "[esm.sh](https://esm.sh/lz-string@1.5.0)"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Procedural Character Editor">
+      <span class="brand-mark" aria-hidden="true">P</span>
+      <span>PCE<small>PROCEDURAL CHARACTER EDITOR</small></span>
+    </a>
+
+    <label class="name-field">
+      <span class="sr-only">Nombre del personaje</span>
+      <input id="character-name" maxlength="80" value="Untitled Character">
+    </label>
+
+    <nav class="actions" aria-label="Archivo">
+      <button id="new" title="Crear un personaje nuevo">Nuevo</button>
+      <button id="import" title="Importar JSON (Ctrl+O)">Importar</button>
+      <button id="export" class="primary" title="Exportar JSON (Ctrl+S)">
+        Exportar
+      </button>
+      <button id="copy">Copiar JSON</button>
+      <button id="share">Compartir</button>
+      <button id="theme" aria-label="Cambiar tema" aria-pressed="false">
+        Tema
+      </button>
+    </nav>
+  </header>
+
+  <main class="workspace" data-mobile="viewport">
+    <aside id="categories" class="categories" aria-label="Categorías">
+      <div class="panel-heading">
+        <span>PERSONAJE</span>
+        <small>Parámetros procedurales</small>
+      </div>
+      <nav id="category-list" aria-label="Grupos de parámetros"></nav>
+    </aside>
+
+    <section id="viewport" class="viewport" aria-label="Vista 3D">
+      <canvas id="canvas" tabindex="0"
+        aria-label="Personaje 3D. Arrastra para orbitar, rueda para acercar.">
+      </canvas>
+
+      <div class="viewport-heading">
+        <div><strong>Character studio</strong><small id="view-label">Vista perspectiva</small></div>
+        <label class="debug-toggle">
+          <input id="debug-toggle" type="checkbox"> Debug
+        </label>
+      </div>
+
+      <output id="debug" class="debug" hidden></output>
+      <div class="viewport-help">Arrastrar: orbitar · Rueda: zoom · F: enfocar</div>
+
+      <div class="floating-toolbar" role="toolbar" aria-label="Herramientas 3D">
+        <label class="seed-field">
+          Seed
+          <input id="seed" type="number" min="0" max="4294967295"
+            step="1" aria-label="Semilla procedural">
+        </label>
+        <button id="randomize" class="primary" title="Generar con esta seed (R)">
+          Randomize
+        </button>
+        <button id="next-seed" title="Elegir otra seed y generar">Otra seed</button>
+        <button id="reset">Reset</button>
+        <button id="screenshot">Screenshot</button>
+        <button id="rotate" aria-pressed="false" title="Rotación automática (Espacio)">
+          Rotar
+        </button>
+      </div>
+
+      <div id="loading" class="loading" role="status">Inicializando editor...</div>
+    </section>
+
+    <aside class="properties" aria-label="Propiedades">
+      <div class="panel-heading">
+        <h1 id="group-title">Cuerpo</h1>
+        <small id="group-count"></small>
+      </div>
+      <form id="controls" autocomplete="off"></form>
+    </aside>
+  </main>
+
+  <nav class="mobile-tabs" aria-label="Panel móvil">
+    <button data-panel="categories" aria-pressed="false">Categorías</button>
+    <button data-panel="viewport" aria-pressed="true">Vista 3D</button>
+    <button data-panel="properties" aria-pressed="false">Controles</button>
+  </nav>
+
+  <footer class="statusbar">
+    <div>
+      <button id="undo" title="Deshacer (Ctrl+Z)">Deshacer</button>
+      <button id="redo" title="Rehacer (Ctrl+Shift+Z)">Rehacer</button>
+    </div>
+    <span id="save-status" role="status">Sin cambios</span>
+    <span id="renderer-info">WebGL</span>
+  </footer>
+
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <input id="file" type="file" accept=".json,application/json" hidden>
+
+  <noscript>Esta aplicación requiere JavaScript.</noscript>
+  <script type="module" src="./editor.js"></script>
+</body>
+</html>

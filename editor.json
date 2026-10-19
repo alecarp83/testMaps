@@ -1,0 +1,92 @@
+{
+  "meta": {
+    "schemaVersion": "1.0.0",
+    "author": "PCE",
+    "description": "Contrato de parámetros del Procedural Character Editor. Medidas corporales en metros; proporciones normalizadas salvo indicación.",
+    "characterName": "Untitled Character",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "modifiedAt": "2026-01-01T00:00:00.000Z",
+    "seed": 123456789
+  },
+  "body": {
+    "height": {"id":"body.height","label":"Altura (m)","type":"float","min":1.3,"max":2.1,"step":0.01,"default":1.75,"value":1.75,"group":"body"},
+    "weight": {"id":"body.weight","label":"Complexión","type":"float","min":0,"max":1,"step":0.01,"default":0.5,"value":0.5,"group":"body"},
+    "muscleMass": {"id":"body.muscleMass","label":"Masa muscular","type":"float","min":0,"max":1,"step":0.01,"default":0.45,"value":0.45,"group":"body"},
+    "bodyFat": {"id":"body.bodyFat","label":"Grasa corporal","type":"float","min":0,"max":1,"step":0.01,"default":0.3,"value":0.3,"group":"body"},
+    "shoulderWidth": {"id":"body.shoulderWidth","label":"Ancho de hombros","type":"float","min":0.7,"max":1.4,"step":0.01,"default":1,"value":1,"group":"body"},
+    "hipWidth": {"id":"body.hipWidth","label":"Ancho de caderas","type":"float","min":0.7,"max":1.4,"step":0.01,"default":1,"value":1,"group":"body"},
+    "torsoLength": {"id":"body.torsoLength","label":"Largo del torso","type":"float","min":0.8,"max":1.2,"step":0.01,"default":1,"value":1,"group":"body"},
+    "limbLength": {"id":"body.limbLength","label":"Largo de extremidades","type":"float","min":0.8,"max":1.2,"step":0.01,"default":1,"value":1,"group":"body"},
+    "neckLength": {"id":"body.neckLength","label":"Largo del cuello","type":"float","min":0.65,"max":1.4,"step":0.01,"default":1,"value":1,"group":"body"},
+    "headSize": {"id":"body.headSize","label":"Tamaño de cabeza","type":"float","min":0.8,"max":1.25,"step":0.01,"default":1,"value":1,"group":"body"}
+  },
+  "face": {
+    "headShape": {"id":"face.headShape","label":"Forma de cabeza","type":"enum","options":["oval","round","square","heart","diamond"],"default":"oval","value":"oval","group":"face"},
+    "jawWidth": {"id":"face.jawWidth","label":"Mandíbula","type":"float","min":0.7,"max":1.35,"step":0.01,"default":1,"value":1,"group":"face"},
+    "chinLength": {"id":"face.chinLength","label":"Mentón","type":"float","min":0.7,"max":1.3,"step":0.01,"default":1,"value":1,"group":"face"},
+    "cheekbones": {"id":"face.cheekbones","label":"Pómulos","type":"float","min":0.7,"max":1.3,"step":0.01,"default":1,"value":1,"group":"face"},
+    "eyeSize": {"id":"face.eyeSize","label":"Tamaño de ojos","type":"float","min":0.7,"max":1.3,"step":0.01,"default":1,"value":1,"group":"face"},
+    "eyeSpacing": {"id":"face.eyeSpacing","label":"Separación de ojos","type":"float","min":0.8,"max":1.2,"step":0.01,"default":1,"value":1,"group":"face"},
+    "eyeShape": {"id":"face.eyeShape","label":"Forma de ojos","type":"enum","options":["almond","round","hooded","monolid","upturned"],"default":"almond","value":"almond","group":"face"},
+    "eyeColor": {"id":"face.eyeColor","label":"Anillo exterior del iris","type":"color","default":"#4a3b2a","value":"#4a3b2a","group":"face"},
+    "eyebrowThickness": {"id":"face.eyebrowThickness","label":"Grosor de cejas","type":"float","min":0.3,"max":1.8,"step":0.01,"default":1,"value":1,"group":"face"},
+    "eyebrowAngle": {"id":"face.eyebrowAngle","label":"Ángulo de cejas (°)","type":"float","min":-25,"max":25,"step":1,"default":0,"value":0,"group":"face"},
+    "noseLength": {"id":"face.noseLength","label":"Largo de nariz","type":"float","min":0.7,"max":1.4,"step":0.01,"default":1,"value":1,"group":"face"},
+    "noseWidth": {"id":"face.noseWidth","label":"Ancho de nariz","type":"float","min":0.65,"max":1.4,"step":0.01,"default":1,"value":1,"group":"face"},
+    "noseTip": {"id":"face.noseTip","label":"Punta de nariz","type":"float","min":0.6,"max":1.5,"step":0.01,"default":1,"value":1,"group":"face"},
+    "mouthWidth": {"id":"face.mouthWidth","label":"Ancho de boca","type":"float","min":0.7,"max":1.4,"step":0.01,"default":1,"value":1,"group":"face"},
+    "lipThickness": {"id":"face.lipThickness","label":"Grosor de labios","type":"float","min":0.4,"max":1.8,"step":0.01,"default":1,"value":1,"group":"face"},
+    "lipShape": {"id":"face.lipShape","label":"Forma de labios","type":"enum","options":["natural","full","bow","thin"],"default":"natural","value":"natural","group":"face"},
+    "earSize": {"id":"face.earSize","label":"Tamaño de orejas","type":"float","min":0.7,"max":1.4,"step":0.01,"default":1,"value":1,"group":"face"},
+    "earAngle": {"id":"face.earAngle","label":"Ángulo de orejas (°)","type":"float","min":0,"max":40,"step":1,"default":12,"value":12,"group":"face"},
+    "freckles": {"id":"face.freckles","label":"Pecas","type":"bool","default":false,"value":false,"group":"face"},
+    "skinTone": {"id":"face.skinTone","label":"Tono de piel","type":"color","default":"#e8b89a","value":"#e8b89a","group":"face"},
+    "blemishes": {"id":"face.blemishes","label":"Marcas de piel","type":"float","min":0,"max":1,"step":0.01,"default":0.2,"value":0.2,"group":"face"}
+  },
+  "hair": {
+    "style": {"id":"hair.style","label":"Peinado","type":"enum","options":["short","medium","long","buzz","bald","ponytail","bun","curly","wavy","straight"],"default":"short","value":"short","group":"hair"},
+    "color": {"id":"hair.color","label":"Color de pelo","type":"color","default":"#2b1b10","value":"#2b1b10","group":"hair"},
+    "length": {"id":"hair.length","label":"Longitud","type":"float","min":0,"max":1,"step":0.01,"default":0.45,"value":0.45,"group":"hair"},
+    "volume": {"id":"hair.volume","label":"Volumen","type":"float","min":0,"max":1,"step":0.01,"default":0.4,"value":0.4,"group":"hair"},
+    "fringeStyle": {"id":"hair.fringeStyle","label":"Flequillo","type":"enum","options":["none","straight","side","curtain"],"default":"side","value":"side","group":"hair"},
+    "facialHair": {"id":"hair.facialHair","label":"Vello facial","type":"enum","options":["none","stubble","beard","goatee","mustache","full"],"default":"none","value":"none","group":"hair"},
+    "facialHairDensity": {"id":"hair.facialHairDensity","label":"Densidad de vello","type":"float","min":0,"max":1,"step":0.01,"default":0.5,"value":0.5,"group":"hair"}
+  },
+  "eyes": {
+    "pupilSize": {"id":"eyes.pupilSize","label":"Tamaño de pupila","type":"float","min":0.2,"max":0.75,"step":0.01,"default":0.4,"value":0.4,"group":"eyes"},
+    "irisColor": {"id":"eyes.irisColor","label":"Color interior del iris","type":"color","default":"#5c7c3a","value":"#5c7c3a","group":"eyes"},
+    "scleraTint": {"id":"eyes.scleraTint","label":"Esclerótica","type":"color","default":"#fffaf5","value":"#fffaf5","group":"eyes"},
+    "lashesLength": {"id":"eyes.lashesLength","label":"Pestañas","type":"float","min":0,"max":1,"step":0.01,"default":0.35,"value":0.35,"group":"eyes"}
+  },
+  "clothing": {
+    "topType": {"id":"clothing.topType","label":"Prenda superior","type":"enum","options":["none","tshirt","shirt","hoodie","jacket"],"default":"tshirt","value":"tshirt","group":"clothing"},
+    "topColor": {"id":"clothing.topColor","label":"Color superior","type":"color","default":"#315f76","value":"#315f76","group":"clothing"},
+    "bottomType": {"id":"clothing.bottomType","label":"Prenda inferior","type":"enum","options":["none","jeans","chinos","shorts","skirt"],"default":"jeans","value":"jeans","group":"clothing"},
+    "bottomColor": {"id":"clothing.bottomColor","label":"Color inferior","type":"color","default":"#29394f","value":"#29394f","group":"clothing"},
+    "shoeType": {"id":"clothing.shoeType","label":"Calzado","type":"enum","options":["none","sneakers","boots","dress"],"default":"sneakers","value":"sneakers","group":"clothing"},
+    "shoeColor": {"id":"clothing.shoeColor","label":"Color de calzado","type":"color","default":"#dedbd4","value":"#dedbd4","group":"clothing"}
+  },
+  "accessories": {
+    "glasses": {"id":"accessories.glasses","label":"Gafas","type":"enum","options":["none","round","square","aviator"],"default":"none","value":"none","group":"accessories"},
+    "hat": {"id":"accessories.hat","label":"Sombrero","type":"enum","options":["none","cap","beanie","fedora"],"default":"none","value":"none","group":"accessories"},
+    "earrings": {"id":"accessories.earrings","label":"Pendientes","type":"bool","default":false,"value":false,"group":"accessories"}
+  },
+  "materials": {
+    "skinRoughness": {"id":"materials.skinRoughness","label":"Rugosidad de piel","type":"float","min":0,"max":1,"step":0.01,"default":0.55,"value":0.55,"group":"materials"},
+    "skinSubsurface": {"id":"materials.skinSubsurface","label":"Dispersión aproximada","type":"float","min":0,"max":1,"step":0.01,"default":0.25,"value":0.25,"group":"materials"},
+    "hairRoughness": {"id":"materials.hairRoughness","label":"Rugosidad de pelo","type":"float","min":0,"max":1,"step":0.01,"default":0.65,"value":0.65,"group":"materials"},
+    "clothRoughness": {"id":"materials.clothRoughness","label":"Rugosidad de tela","type":"float","min":0,"max":1,"step":0.01,"default":0.85,"value":0.85,"group":"materials"}
+  },
+  "pose": {
+    "stance": {"id":"pose.stance","label":"Postura","type":"enum","options":["idle","relaxed","action","tpose"],"default":"relaxed","value":"relaxed","group":"pose"},
+    "armAngleL": {"id":"pose.armAngleL","label":"Brazo izquierdo (°)","type":"float","min":-30,"max":90,"step":1,"default":0,"value":0,"group":"pose"},
+    "armAngleR": {"id":"pose.armAngleR","label":"Brazo derecho (°)","type":"float","min":-30,"max":90,"step":1,"default":0,"value":0,"group":"pose"},
+    "headTilt": {"id":"pose.headTilt","label":"Inclinación de cabeza (°)","type":"float","min":-25,"max":25,"step":1,"default":0,"value":0,"group":"pose"},
+    "expression": {"id":"pose.expression","label":"Expresión","type":"enum","options":["neutral","smile","frown","surprised","angry"],"default":"neutral","value":"neutral","group":"pose"}
+  },
+  "scene": {
+    "background": {"id":"scene.background","label":"Fondo","type":"enum","options":["studio","gradient","transparent","environment"],"default":"studio","value":"studio","group":"scene"},
+    "lighting": {"id":"scene.lighting","label":"Iluminación","type":"enum","options":["studio","outdoor","dramatic","soft"],"default":"studio","value":"studio","group":"scene"},
+    "cameraDistance": {"id":"scene.cameraDistance","label":"Distancia de cámara","type":"float","min":1.2,"max":6,"step":0.05,"default":3.2,"value":3.2,"group":"scene"}
+  }
+}
