@@ -4,6 +4,15 @@
   ECLIPSE · CAPÍTULO 1 — Lógica del protagonista, cámara en 3ª persona,
   enemigos infectados, linterna, colisiones, HUD y bucle principal.
   Estética tipo Roblox (bloques low-poly) con iluminación y niebla realistas.
+
+  Optimizaciones aplicadas:
+    1) Cache de geometrías (boxGeo)
+    2) Cache de materiales (mat) + materiales compartidos en humanoides
+    3) solidMeshes[] paralelo a solids para raycasts
+    4) Poda de castShadow en decoración pequeña + sombra linterna 512/cada 3 frames
+    5) Apagado de PointLights fuera de un radio alrededor del jugador
+    7) Pixel ratio adaptativo (desktop 1.5 / táctil 1.0)
+    9) Corte temprano por distancia en visibleBetween()
 */
 
 (() => {
@@ -71,20 +80,26 @@
   const camera = new T.PerspectiveCamera(65, innerWidth / innerHeight, .08, 100);
   const raycaster = new T.Raycaster();
   const solids = [];
-  const solidMeshes = [];   // --- Ajuste 3: array paralelo para raycasts ---
+  const solidMeshes = [];   // --- Ajuste 3 ---
   const interactables = [];
   const enemies = [];
   const emergencyLights = [];
+  const ambientLights = []; // --- Ajuste 5: luces azules con z asociado ---
   const doors = [];
   const keys = new Set();
   const clock = new T.Clock();
+
+  // Reutilizables para evitar allocations por frame
+  const _tmpA = new T.Vector3();
+  const _tmpB = new T.Vector3();
 
   // ---------------------------------------------------------------
   // 4. Estado global y jugador
   // ---------------------------------------------------------------
   const state = {
     paused: true, dead: false, ending: false, finished: false,
-    time: 0, endTime: 0, stage: 0, toastTime: 0, damage: 0
+    time: 0, endTime: 0, stage: 0, toastTime: 0, damage: 0,
+    shadowFrame: 0
   };
 
   const player = {
@@ -141,7 +156,6 @@
     dark: mat(0x101820)
   };
 
-  // Materiales compartidos de humanoides (evita crear 5 materiales por cuerpo)
   const humanoidMats = {
     clothAlive: mat(0x9a7450),
     clothInfected: mat(0x514c50),
@@ -155,12 +169,13 @@
 
   // ---------------------------------------------------------------
   // 5. Utilidades de construcción
+  //    Ajuste 4: opts.cast / opts.receive para podar sombras finas.
   // ---------------------------------------------------------------
-  function box(x, y, z, w, h, d, material, solid = false) {
+  function box(x, y, z, w, h, d, material, solid = false, opts = {}) {
     const mesh = new T.Mesh(boxGeo(w, h, d), material);
     mesh.position.set(x, y, z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.castShadow = opts.cast !== false;
+    mesh.receiveShadow = opts.receive !== false;
     scene.add(mesh);
     if (solid) {
       solids.push({
@@ -168,7 +183,7 @@
         minX: x - w / 2, maxX: x + w / 2,
         minZ: z - d / 2, maxZ: z + d / 2
       });
-      solidMeshes.push(mesh);   // --- Ajuste 3 ---
+      solidMeshes.push(mesh);
     }
     return mesh;
   }
@@ -208,33 +223,40 @@
 
   for (const sector of sectors) {
     const middle = (sector.start + sector.end) / 2;
+
+    // Estructura principal: cast + receive (sí importa para la linterna)
     box(0, -.25, middle, 14, .5, 20, materials.floor);
     box(0, 5.3, middle, 14, .6, 20, materials.dark);
     box(-7.25, 2.5, middle, .5, 5, 20, materials.wall, true);
     box(7.25, 2.5, middle, .5, 5, 20, materials.wall, true);
 
+    // Decoración fina: sin cast (no aporta y encarece el shadow map)
     for (let z = sector.start + 2; z < sector.end; z += 4) {
-      box(-6.88, 2.5, z, .22, 5, .3, materials.trim);
-      box(6.88, 2.5, z, .22, 5, .3, materials.trim);
-      box(0, .008, z, 13.9, .016, .045, materials.trim);
-      box(-6.7, 4.1, z, .25, .25, 4, materials.pipe);
-      box(6.7, 3.8, z, .18, .18, 4, materials.pipe);
+      box(-6.88, 2.5, z, .22, 5, .3, materials.trim, false, { cast: false });
+      box(6.88, 2.5, z, .22, 5, .3, materials.trim, false, { cast: false });
+      box(0, .008, z, 13.9, .016, .045, materials.trim, false, { cast: false });
+      box(-6.7, 4.1, z, .25, .25, 4, materials.pipe, false, { cast: false });
+      box(6.7, 3.8, z, .18, .18, 4, materials.pipe, false, { cast: false });
     }
 
     label(sector.name.toUpperCase(), 0, 4.1, sector.start + 3);
 
+    // --- Ajuste 5: registrar luz roja con su z ---
     const red = new T.PointLight(0xff3427, 15, 15, 2);
     red.position.set(-4, 4.2, middle);
     scene.add(red);
-    emergencyLights.push(red);
-    box(-4, 4.55, middle, .8, .14, .4, mat(0x9a241d, {
-      emissive: 0xff261b, emissiveIntensity: 2
-    }));
+    emergencyLights.push({ light: red, z: middle });
+    box(-4, 4.55, middle, .8, .14, .4,
+        mat(0x9a241d, { emissive: 0xff261b, emissiveIntensity: 2 }),
+        false, { cast: false });
 
+    // --- Ajuste 5: registrar luz azul con su z ---
     const blue = new T.PointLight(0x5799b5, 9, 11, 2);
     blue.position.set(5, 2.5, middle + 4);
     scene.add(blue);
-    box(6.8, 2.5, middle + 4, .12, 1.1, 1.8, materials.screen);
+    ambientLights.push({ light: blue, z: middle + 4, base: 9 });
+    box(6.8, 2.5, middle + 4, .12, 1.1, 1.8, materials.screen,
+        false, { cast: false });
   }
 
   box(0, 2.5, -.25, 14, 5, .5, materials.wall, true);
@@ -269,7 +291,7 @@
   function createDoor(z, requirement, denied) {
     box(-4.7, 2.5, z, 4.6, 5, .6, materials.wall, true);
     box(4.7, 2.5, z, 4.6, 5, .6, materials.wall, true);
-    box(0, 4.65, z, 4.8, .7, .7, materials.trim);
+    box(0, 4.65, z, 4.8, .7, .7, materials.trim, false, { cast: false });
 
     const mesh = box(0, 2.05, z, 4.8, 4.1, .45, materials.trim, true);
     const collider = solids[solids.length - 1];
@@ -280,7 +302,6 @@
       if (!requirement()) return toast(denied);
       door.open = true;
       item.active = false;
-      // --- Ajuste 3: quitar también de solidMeshes ---
       const idx = solids.indexOf(collider);
       if (idx >= 0) solids.splice(idx, 1);
       const mIdx = solidMeshes.indexOf(collider.mesh);
@@ -291,7 +312,8 @@
       audio.effect("door");
     }, 3);
 
-    box(2.65, 1.6, z - .4, .3, .5, .18, materials.screen);
+    box(2.65, 1.6, z - .4, .3, .5, .18, materials.screen,
+        false, { cast: false });
   }
 
   createDoor(20, () => player.card, "La compuerta requiere una tarjeta de acceso.");
@@ -299,39 +321,43 @@
   createDoor(60, () => player.power, "Sin energía. Activa el panel de la Enfermería.");
 
   // ---------------------------------------------------------------
-  // 8. Decoración
+  // 8. Decoración (mayoría con cast:false — piezas finas)
   // ---------------------------------------------------------------
   for (const z of [6, 13, 25, 34, 46, 56, 65, 73]) {
     const side = z % 2 ? -1 : 1;
     box(side * 5.4, .65, z, 1.7, 1.3, 1.5, materials.crate, true);
-    box(side * 5.4, 1.33, z, 1.8, .08, 1.6, materials.trim);
+    box(side * 5.4, 1.33, z, 1.8, .08, 1.6, materials.trim,
+        false, { cast: false });
   }
 
   for (const z of [7, 11, 15]) {
     box(-5.6, .75, z, 2, .3, 2.6, materials.trim, true);
-    box(-5.6, 1, z, 1.8, .22, 2.3, humanoidMats.bedTop);
+    box(-5.6, 1, z, 1.8, .22, 2.3, humanoidMats.bedTop, false, { cast: false });
   }
 
   for (const x of [-3.7, 3.7]) {
     for (const z of [27, 33]) {
       box(x, .65, z, 2.2, 1.3, 2.4, materials.dark, true);
-      box(x, 1.35, z, 2.7, .15, 2.8, materials.trim);
+      box(x, 1.35, z, 2.7, .15, 2.8, materials.trim, false, { cast: false });
       box(x, .42, z + 2, 2.3, .84, .5, materials.crate, true);
     }
   }
 
   for (const z of [45, 51, 56]) {
     box(-4.6, .65, z, 2.2, 1.3, 2.7, materials.trim, true);
-    box(-4.6, 1.4, z, 2, .25, 2.5, humanoidMats.bed);
+    box(-4.6, 1.4, z, 2, .25, 2.5, humanoidMats.bed, false, { cast: false });
   }
 
+  // Manchas y cristales: no proyectan sombra (piezas de 2 cm)
   for (let i = 0; i < 28; i++) {
     const z = 8 + i * 2.4;
     const x = Math.sin(i * 8.3) * 5;
-    const stain = box(x, .015, z, .6 + (i % 3) * .25, .02, .45, materials.blood);
+    const stain = box(x, .015, z, .6 + (i % 3) * .25, .02, .45,
+        materials.blood, false, { cast: false, receive: false });
     stain.rotation.y = i * 2.1;
     if (i % 3 === 0) {
-      const shard = box(x + .6, .04, z, .24, .07, .4, materials.trim);
+      const shard = box(x + .6, .04, z, .24, .07, .4, materials.trim,
+          false, { cast: false, receive: false });
       shard.rotation.y = i;
     }
   }
@@ -348,21 +374,24 @@
     const skin  = infected ? humanoidMats.skinInfected  : humanoidMats.skinAlive;
     const legsMaterial = infected ? humanoidMats.legsInfected : humanoidMats.legsAlive;
 
-    function part(w, h, d, material, x, y, z, parent = body) {
+    // opts.cast por defecto true en piezas principales; false en detalles
+    function part(w, h, d, material, x, y, z, parent = body, opts = {}) {
       const mesh = new T.Mesh(boxGeo(w, h, d), material);
       mesh.position.set(x, y, z);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      mesh.castShadow = opts.cast !== false;
+      mesh.receiveShadow = opts.receive !== false;
       parent.add(mesh);
       return mesh;
     }
 
     part(.72, .8, .4, cloth, 0, 1.13, 0);
     part(.48, .48, .45, skin, 0, 1.82, 0);
-    part(.36, .13, .04, materials.dark, 0, 1.87, .245);
+    part(.36, .13, .04, materials.dark, 0, 1.87, .245,
+        body, { cast: false, receive: false });   // visor
     if (!infected) {
-      part(.48, .57, .24, legsMaterial, 0, 1.2, -.3);
-      part(.16, .09, .035, materials.screen, .2, 1.3, .225);
+      part(.48, .57, .24, legsMaterial, 0, 1.2, -.3); // mochila
+      part(.16, .09, .035, materials.screen, .2, 1.3, .225,
+          body, { cast: false, receive: false });     // insignia
     }
 
     const limbs = [];
@@ -462,7 +491,7 @@
     2.5
   );
 
-  box(0, 2, 79.7, 4.5, 4, .25, materials.trim);
+  box(0, 2, 79.7, 4.5, 4, .25, materials.trim, false, { cast: false });
   const exitPanel = box(3, 1.4, 77, .6, 1.2, .6, materials.screen, true);
   addInteraction(
     exitPanel,
@@ -493,24 +522,30 @@
     }
   }
 
+  // --- Ajuste 9: corte por distancia antes de tocar el raycaster ---
+  const VIS_RANGE = 18;
+  const VIS_RANGE_SQ = VIS_RANGE * VIS_RANGE;
   function visibleBetween(from, to) {
-    const direction = to.clone().sub(from);
-    const distance = direction.length();
+    if (from.distanceToSquared(to) > VIS_RANGE_SQ) return false;
+    _tmpA.copy(to).sub(from);
+    const distance = _tmpA.length();
     if (distance < .01) return true;
-    raycaster.set(from, direction.normalize());
+    _tmpA.multiplyScalar(1 / distance);
+    raycaster.set(from, _tmpA);
     raycaster.near = 0;
     raycaster.far = distance;
-    // --- Ajuste 3: usar solidMeshes ---
     return raycaster.intersectObjects(solidMeshes, false).length === 0;
   }
 
   // ---------------------------------------------------------------
-  // 13. Linterna
+  // 13. Linterna (sombra 512, refresco cada 3 frames)
   // ---------------------------------------------------------------
   const flashlight = new T.SpotLight(0xffdfac, 65, 23, .37, .65, 1.2);
   flashlight.castShadow = true;
-  flashlight.shadow.mapSize.set(1024, 1024);
+  flashlight.shadow.mapSize.set(512, 512);
   flashlight.shadow.bias = -.0005;
+  flashlight.shadow.autoUpdate = false;
+  flashlight.shadow.needsUpdate = true;
   scene.add(flashlight, flashlight.target);
 
   const beamGeometry = new T.ConeGeometry(1.8, 7, 24, 1, true);
@@ -609,27 +644,34 @@
   }
 
   // ---------------------------------------------------------------
-  // 17. Actualización de la linterna
+  // 17. Actualización de la linterna (refresco de sombra cada 3 frames)
   // ---------------------------------------------------------------
   function updateLight() {
-    const forward = new T.Vector3(
+    const forward = _tmpB.set(
       Math.sin(yaw) * Math.cos(pitch),
       -Math.sin(pitch),
       Math.cos(yaw) * Math.cos(pitch)
     );
-    const right = new T.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+    const rightX = -Math.cos(yaw);
+    const rightZ = Math.sin(yaw);
 
-    flashlight.position.copy(player.pos)
-      .add(new T.Vector3(0, player.crouched ? 1 : 1.5, 0))
-      .addScaledVector(right, .4);
+    flashlight.position.copy(player.pos);
+    flashlight.position.y += player.crouched ? 1 : 1.5;
+    flashlight.position.x += rightX * .4;
+    flashlight.position.z += rightZ * .4;
 
-    flashlight.target.position.copy(flashlight.position)
-      .addScaledVector(forward, 12);
+    flashlight.target.position.copy(flashlight.position).addScaledVector(forward, 12);
 
     flashlight.visible = player.flashlight;
     flashlight.intensity = player.battery < 15
       ? 40 + Math.sin(state.time * 29) * 16
       : 65;
+
+    // --- Ajuste 4: sombra de la linterna a ~20 Hz ---
+    if (player.flashlight) {
+      state.shadowFrame = (state.shadowFrame + 1) % 3;
+      if (state.shadowFrame === 0) flashlight.shadow.needsUpdate = true;
+    }
 
     beam.visible = player.flashlight;
     beam.position.copy(flashlight.position);
@@ -659,7 +701,6 @@
     raycaster.set(pivot, direction.normalize());
     raycaster.near = 0;
     raycaster.far = distance + .18;
-    // --- Ajuste 3: usar solidMeshes ---
     const hits = raycaster.intersectObjects(solidMeshes, false);
     if (hits.length) {
       camera.position.copy(pivot).addScaledVector(
@@ -690,7 +731,8 @@
 
       const eye = enemy.pos.clone().add(new T.Vector3(0, 1.5, 0));
       const targetEye = player.pos.clone().add(new T.Vector3(0, 1.2, 0));
-      const clear = distance < 18 && visibleBetween(eye, targetEye);
+      // --- Ajuste 9: visibleBetween ya corta a 18 m internamente ---
+      const clear = visibleBetween(eye, targetEye);
 
       const noiseRange = player.running ? 11
         : player.moving ? (player.crouched ? 1.4 : 4.5) : 0;
@@ -766,7 +808,6 @@
       raycaster.set(eye, direction.clone().normalize());
       raycaster.near = 0;
       raycaster.far = direction.length();
-      // --- Ajuste 3: usar solidMeshes ---
       const hits = raycaster.intersectObjects(solidMeshes, false);
       if (hits.length && hits[0].object !== item.mesh) continue;
 
@@ -839,6 +880,7 @@
     $("overlay").hidden = true;
     clock.getDelta();
     audio.start();
+    flashlight.shadow.needsUpdate = true;
     if (renderer.domElement.requestPointerLock) {
       const p = renderer.domElement.requestPointerLock();
       if (p && typeof p.catch === "function") p.catch(() => {});
@@ -910,7 +952,6 @@
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
-    // --- Ajuste 7: recalcular pixel ratio también en resize ---
     applyPixelRatio();
     renderer.setSize(innerWidth, innerHeight);
   });
@@ -1017,8 +1058,18 @@
     updateInteraction();
     updateHUD(dt, proximity);
 
-    for (const light of emergencyLights) {
-      light.intensity = 15 + Math.sin(state.time * 7 + light.position.z) * 6;
+    // --- Ajuste 5: activar/desactivar luces según distancia al jugador ---
+    const pz = player.pos.z;
+    for (const entry of emergencyLights) {
+      const near = Math.abs(pz - entry.z) < 25;
+      entry.light.visible = near;
+      if (near) entry.light.intensity =
+        15 + Math.sin(state.time * 7 + entry.z) * 6;
+    }
+    for (const entry of ambientLights) {
+      const near = Math.abs(pz - entry.z) < 25;
+      entry.light.visible = near;
+      if (near) entry.light.intensity = entry.base;
     }
 
     for (const door of doors) {
