@@ -1,75 +1,58 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport"
-    content="width=device-width, initial-scale=1, maximum-scale=1,
-    user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#080d13">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ECLIPSE | Protocolo Eclipse</title>
-  <link rel="stylesheet" href="./mapa1.css">
-  <link rel="stylesheet" href="./personaje.css">
-  <script src="./catalogo_personajes.js" defer></script>
-  <script type="module" src="./personaje.js"></script>
+  <link rel="stylesheet" href="mapa1.css">
+  <link rel="stylesheet" href="personaje.css">
 </head>
-<body data-page="game" data-state="intro">
-  <canvas id="scene" aria-label="Escenario isométrico del capítulo 1"></canvas>
+<body>
+  <div id="viewport"></div>
+  <div class="vignette" aria-hidden="true"></div>
+  <div id="damage" aria-hidden="true"></div>
 
-  <header id="hud">
-    <div class="status panel">
-      <strong id="player-name"></strong>
-      <label>VIDA <progress id="health" max="100" value="100"></progress></label>
-      <label>BATERÍA <progress id="battery" max="100" value="100"></progress></label>
-      <label>ENERGÍA <progress id="stamina" max="100" value="100"></progress></label>
-    </div>
-
-    <div class="navigation">
-      <button id="pause-button" aria-label="Pausar juego">Ⅱ</button>
-      <canvas id="minimap" width="192" height="56"
-        aria-label="Minimapa: jugador, enemigos cercanos y puertas"></canvas>
-    </div>
+  <header class="mission">
+    <span class="caption">ISV KEPLER-9 / PROTOCOLO ECLIPSE</span>
+    <h1 id="sector">Pasillo A</h1>
+    <p id="objective">Encuentra la tarjeta de acceso en el Pasillo A.</p>
   </header>
 
-  <div id="objective" class="objective"></div>
-  <div id="toast" role="status" aria-live="polite"></div>
-  <div class="orientation">Gira el dispositivo para una vista más amplia</div>
-  <div id="damage" aria-hidden="true"></div>
-  <div id="breathing" aria-hidden="true"></div>
+  <aside class="status">
+    <label>INTEGRIDAD <span id="hpText">100</span></label>
+    <progress id="hp" max="100" value="100"></progress>
+    <label>RESISTENCIA</label>
+    <progress id="stamina" max="100" value="100"></progress>
+    <label>LINTERNA <span id="batteryText">100%</span></label>
+    <progress id="battery" max="100" value="100"></progress>
+    <div id="inventory">Celdas: 1</div>
+  </aside>
 
-  <section id="controls" aria-label="Controles táctiles">
-    <div id="joystick" aria-label="Joystick de movimiento">
-      <div id="stick"></div>
-    </div>
-
-    <div class="utility">
-      <button id="light" aria-pressed="false">LUZ</button>
-      <button id="stealth" aria-pressed="false">SIGILO</button>
-      <button id="sprint" aria-pressed="false">CORRER</button>
-    </div>
-
-    <div class="combat">
-      <button id="interact">USAR</button>
-      <button id="dodge">RODAR</button>
-      <button id="attack">ATAQUE</button>
-    </div>
-  </section>
+  <div id="crosshair" aria-hidden="true">+</div>
+  <div id="interaction"></div>
+  <div id="toast" role="status"></div>
+  <div id="threat">ACTIVIDAD BIOLÓGICA CERCANA</div>
+  <div class="controls">
+    WASD · Mover / SHIFT · Correr / CTRL · Sigilo / E · Usar
+    <br>F · Linterna / R · Recargar / RUEDA · Zoom / ESC · Pausa
+  </div>
 
   <section id="overlay" class="overlay">
-    <div class="panel story">
-      <p class="eyebrow">REGISTRO DE EMERGENCIA / 01</p>
-      <h1 id="overlay-title">Protocolo Eclipse</h1>
-      <p id="overlay-text">
-        La ISV Kepler-9 viajaba hacia Meridian con 340 pasajeros en
-        criosueño. Un contenedor biológico se ha roto.
-        La alarma te despierta. El resto de la tripulación no responde.
-        Alcanza la bahía de escape.
+    <div class="modal">
+      <span class="caption">ENLACE NEURONAL / TÉCNICO DE MANTENIMIENTO</span>
+      <h2 id="overlayTitle">Protocolo Eclipse</h2>
+      <p id="overlayText">
+        Despiertas en el Pasillo A. Recupera una tarjeta, restablece
+        la energía y llega a la bahía. La luz y el ruido atraen a los infectados.
       </p>
-      <button id="continue" class="primary">Despertar</button>
-      <a class="button" href="./index.html">Menú principal</a>
+      <button id="resume">Entrar en la nave</button>
+      <button id="restart" hidden>Reintentar capítulo</button>
+      <a href="index.html">Volver al menú</a>
     </div>
   </section>
 
-  <script src="./catalogo_personajes.js" defer></script>
-  <script type="module" src="./personaje.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="sonidos.js"></script>
+  <script src="personaje.js"></script>
 </body>
 </html>
